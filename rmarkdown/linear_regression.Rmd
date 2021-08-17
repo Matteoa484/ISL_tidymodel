@@ -39,7 +39,7 @@ We will start fitting a simple linear regression model, with `medv` as the respo
 
 ```{r}
 ggplot(Boston) +
-    geom_point(aes(x = lstat, y = medv), alpha = .75)
+    geom_point(aes(x = lstat, y = medv), alpha = .5)
 ```
 
 
@@ -111,7 +111,7 @@ predict(lm_fit, new_data = Boston, type = 'conf_int') %>%
 
 In order to evaluate the performance of the model, we can compare the observed and the predicted values.
 
-```{r}
+```{r, fig.align='center', out.width='80%'}
 bind_cols(predict(lm_fit, new_data = Boston),
           Boston) %>%
     select(medv, .pred) %>%
@@ -119,9 +119,9 @@ bind_cols(predict(lm_fit, new_data = Boston),
     geom_point(aes(x = .pred, y = medv), alpha = .5)
 ```
 
-The same results can be obtained with the `augment` function from `tune`.
+The same results can be obtained with the `tune::augment` function.
 
-```{r}
+```{r, fig.align='center', out.width='80%'}
 augment(lm_fit, new_data = Boston) %>%
     select(medv, .pred) %>%
     ggplot() +
@@ -174,12 +174,13 @@ lm_spec %>%
 
 ## Interaction terms
 
-Including an interaction term can be done directly inside the formula notation using the syntax `lstat:black` to include an interaction term between `lastat` and `black` variables. The syntax `lstat*age` is a shorthand for `lstat + age + lstat:age`.
-`Tidymodels` allow us to apply transformations as a pre-processing step, using `recipe`.
+Including an interaction term can be done directly inside the formula notation using the syntax `lstat:black` to include an interaction term between `lstat` and `black` variables. The syntax `lstat*age` is a shorthand for `lstat + age + lstat:age`.
+*Tidymodels* allow us to apply transformations as a pre-processing step, using `recipe`.
 We use the `step_interact` to specify the interaction term. Next we create a workflow object to combine the model specification `lm_spec` with the pre-processing specification `rec_spec_interact` which can be fitted like a `parsnip` model.
 
 ```{r}
-rec_spec_interact <- recipe(medv ~ lstat + age, data = Boston) %>%
+rec_spec_interact <- 
+    recipe(medv ~ lstat + age, data = Boston) %>%
     step_interact(~ lstat:age)
 
 lm_wf_interact <- workflow() %>%
@@ -192,13 +193,13 @@ lm_wf_interact %>% fit(data = Boston)
 ## Non-linear transformation of the predictors
 
 In base R the transformation can be done directly inside the formula notation, using the function `I()`.  
-IN tidymodels this transformations are part of the pre-processing and thus are added to a *recipe*. The `recipe` package has the `step_mutate` function which is pretty much the equivalent of `mutate` in `dplyr`.
+In *tidymodels* this transformations are part of the pre-processing and thus are added to a *recipe*. The `recipe` package has the `step_mutate` function which is pretty much the equivalent of `dplyr::mutate`.
 
 In general you would want to keep as much of the pre-processing inside `recipe` such that the transformations will be applied consistently to new data.
 
 ```{r}
 rec_spec_pow2 <- recipe(medv ~ lstat, data = Boston) %>%
-    step_mutate(lstat2 = lstat ^ 2) # ploy 2 to lstat variable
+    step_mutate(lstat2 = lstat ^ 2) # pow 2 to lstat variable
 
 lm_wf_pow2 <- workflow() %>%
     add_model(lm_spec) %>%
@@ -207,7 +208,7 @@ lm_wf_pow2 <- workflow() %>%
 lm_wf_pow2 %>% fit(Boston)
 ```
 
-Not all the transformations need to be done with `step_mutate` since `recipe` has a bunch of them creted already. For example `step_log` take the logarithm of the variables.
+Not all the transformations need to be done with `recipe::step_mutate` since it  has a bunch of them created already. For example `step_log` take the logarithm of the variables.
 
 ```{r}
 rec_spec_log <- recipe(medv ~ lstat, data = Boston) %>%
@@ -222,7 +223,7 @@ lm_wf_log %>% fit(Boston)
 
 ## Qualitative predictors
 
-The following example is based on the `Carseta` data set from the package `ISLR`. We will predict `Sales` of child car seats in 400 locations based on a number of predictors. 
+The following example is based on the `Carseat` data set from the package `ISLR`. We will predict `Sales` of child car seats in 400 locations based on a number of predictors. 
 
 ```{r}
 head(Carseats)
@@ -244,7 +245,7 @@ Carseats %>%
 ```
 
 The problem is that not all the underlying engines know how to deal with qualitative variables, so we need a way to manage them before the model fitting. `recipe` has different function to deal with this kind of situation.  
-The `step_dummy` will perform the transformation of turning one qualitative variable with x levels into x-1 dummy variables. In the example below we^re also using the `all_nominal_predictors` function to execute the transformation on the character and factor variables.
+The `step_dummy` will perform the transformation of turning one qualitative variable with x levels into x-1 dummy variables. In the example below we're also using the `all_nominal_predictors` function to execute the transformation on the character and factor variables.
 
 ```{r}
 rec_spec <- recipe(Sales ~ ., data = Carseats) %>%
@@ -276,7 +277,7 @@ head(Smarket)
 
 Let's take a look at the correlation of the data, removing `Direction` as it is not numeric.
 
-```{r}
+```{r, fig.align='center', out.width='80%'}
 cor_Smarket <- Smarket %>%
     select(-Direction) %>%
     cor()
@@ -287,7 +288,7 @@ GGally::ggcorr(cor_Smarket, label = TRUE)
 As shown by the corplot, the variables are more or less uncorrelated, except for `Year` and `Volume`.  
 If we plot the two variables we can see that there is an upward trend in `Volume` with time.
 
-```{r}
+```{r, fig.align='center', out.width='80%'}
 ggplot(Smarket, aes(x = Year, y = Volume)) +
     geom_jitter(height = 0, alpha = .5)
 ```
@@ -304,7 +305,7 @@ lr_spec <- logistic_reg() %>%
 lr_spec
 ```
 
-We cannot fit directly the model. We want to model the `Direction` of the stock market based on the percentage return from the previous 5 days plus the volume of the shares traded. `parsnip` requires that the response variable is factor, which is the case for this data set, so we don't need to do any change.
+We want to model the `Direction` of the stock market based on the percentage return from the previous 5 days plus the volume of the shares traded. `parsnip` requires that the response variable is factor, which is the case for this data set, so we don't need to do any change.
 
 ```{r}
 lr_fit <- lr_spec %>%
@@ -313,7 +314,7 @@ lr_fit <- lr_spec %>%
 lr_fit
 ```
 
-The model's main infor could be accessed with `summary`:
+The model's main info could be accessed with `summary`:
 
 ```{r}
 summary(lr_fit$fit)
@@ -323,5 +324,35 @@ Or we can use the `tidy` function to extract some of these parameters.
 
 ```{r}
 tidy(lr_fit)
+```
+
+Predictions are done the same way:
+
+```{r}
+predict(lr_fit, new_data = Smarket)
+```
+
+The result is a tibble with a single column `.pred_class` which will be a factor variable of the same labels as the original training data set.  
+We can also get back probability predictions, by specifying `type = "prob"`.
+
+```{r}
+predict(lr_fit, new_data = Smarket, type = 'prob')
+```
+
+Using `augment` we can add the predictions to the data frame and then use that to look at model performance metrics. Before looking at the metrics, it is useful to look at the confusion matrix.
+
+```{r}
+augment(lr_fit, new_data = Smarket) %>%
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+A good performing model would have high numbers along the diagonal with small numbers on the off-diagonal. In this case, we see that the model isn't great, as it tends to predict *Down* as *Up* more often than it should.
+
+If you want a visual representation of the confusion matrix, you can pipe the result to `ggplot2::autoplot`.
+
+```{r, fig.align='center', out.width='80%'}
+augment(lr_fit, new_data = Smarket) %>%
+    conf_mat(truth = Direction, estimate = .pred_class) %>%
+    autoplot(type = 'heatmap')
 ```
 
