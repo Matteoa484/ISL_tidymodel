@@ -1,5 +1,5 @@
 ---
-title: "Linear Regression"
+title: "Introduction to Statistical Learning"
 author: "Matteo Anro"
 date: "6/18/2021"
 output: 
@@ -10,10 +10,6 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-## Introduction
-
-Exercises from Introduction to Statistical Learning for the Linear Regression chapter
 
 ## Libraries
 
@@ -33,6 +29,10 @@ The `MASS` library contains the `Boston` data set, which records `medv` (median 
 data(Boston)
 
 head(Boston)
+```
+
+```{r}
+skimr::skim(Boston)
 ```
 
 We will start fitting a simple linear regression model, with `medv` as the response and `lstat`as the predictor. As the plot below shows, there's some evidence of non-linearity in the relationship between the two variables:
