@@ -37,7 +37,7 @@ head(Boston)
 
 We will start fitting a simple linear regression model, with `medv` as the response and `lstat`as the predictor. As the plot below shows, there's some evidence of non-linearity in the relationship between the two variables:
 
-```{r}
+```{r, fig.align='center', out.width='60%'}
 ggplot(Boston) +
     geom_point(aes(x = lstat, y = medv), alpha = .5)
 ```
@@ -111,7 +111,7 @@ predict(lm_fit, new_data = Boston, type = 'conf_int') %>%
 
 In order to evaluate the performance of the model, we can compare the observed and the predicted values.
 
-```{r, fig.align='center', out.width='80%'}
+```{r, fig.align='center', out.width='60%'}
 bind_cols(predict(lm_fit, new_data = Boston),
           Boston) %>%
     select(medv, .pred) %>%
@@ -121,7 +121,7 @@ bind_cols(predict(lm_fit, new_data = Boston),
 
 The same results can be obtained with the `tune::augment` function.
 
-```{r, fig.align='center', out.width='80%'}
+```{r, fig.align='center', out.width='60%'}
 augment(lm_fit, new_data = Boston) %>%
     select(medv, .pred) %>%
     ggplot() +
@@ -277,18 +277,17 @@ head(Smarket)
 
 Let's take a look at the correlation of the data, removing `Direction` as it is not numeric.
 
-```{r, fig.align='center', out.width='80%'}
-cor_Smarket <- Smarket %>%
+```{r, fig.align='center', out.width='60%'}
+Smarket %>%
     select(-Direction) %>%
-    cor()
-
-GGally::ggcorr(cor_Smarket, label = TRUE)
+    cor() %>%
+    GGally::ggcorr(label = TRUE)
 ```
 
 As shown by the corplot, the variables are more or less uncorrelated, except for `Year` and `Volume`.  
 If we plot the two variables we can see that there is an upward trend in `Volume` with time.
 
-```{r, fig.align='center', out.width='80%'}
+```{r, fig.align='center', out.width='60%'}
 ggplot(Smarket, aes(x = Year, y = Volume)) +
     geom_jitter(height = 0, alpha = .5)
 ```
@@ -329,14 +328,14 @@ tidy(lr_fit)
 Predictions are done the same way:
 
 ```{r}
-predict(lr_fit, new_data = Smarket)
+predict(lr_fit, new_data = Smarket) %>% head()
 ```
 
 The result is a tibble with a single column `.pred_class` which will be a factor variable of the same labels as the original training data set.  
 We can also get back probability predictions, by specifying `type = "prob"`.
 
 ```{r}
-predict(lr_fit, new_data = Smarket, type = 'prob')
+predict(lr_fit, new_data = Smarket, type = 'prob') %>% head()
 ```
 
 Using `augment` we can add the predictions to the data frame and then use that to look at model performance metrics. Before looking at the metrics, it is useful to look at the confusion matrix.
@@ -354,5 +353,12 @@ If you want a visual representation of the confusion matrix, you can pipe the re
 augment(lr_fit, new_data = Smarket) %>%
     conf_mat(truth = Direction, estimate = .pred_class) %>%
     autoplot(type = 'heatmap')
+```
+
+We can also calculate various performance metrics. One of the most common metrics is accuracy, which is how often the model predicted correctly as a percentage.
+
+```{r}
+augment(lr_fit, new_data = Smarket) %>%
+    accuracy(truth = Direction, estimate = .pred_class)
 ```
 
