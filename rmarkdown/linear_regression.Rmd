@@ -1,0 +1,327 @@
+---
+title: "Linear Regression"
+author: "Matteo Anro"
+date: "6/18/2021"
+output: 
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Exercises from Introduction to Statistical Learning for the Linear Regression chapter
+
+## Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(ISLR)
+library(MASS)
+library(dplyr)
+library(tidymodels)
+library(ggplot2)
+```
+
+## Simple Linear Regression
+
+The `MASS` library contains the `Boston` data set, which records `medv` (median house value) for 506 neighborhoods around Boston. We will seek to predict `medv` using 13 predictors such as `rm` (average number of rooms per house), `age` (average age of house) and `lstat` (percent of households with low socioeconomic status).
+
+```{r}
+data(Boston)
+
+head(Boston)
+```
+
+We will start fitting a simple linear regression model, with `medv` as the response and `lstat`as the predictor. As the plot below shows, there's some evidence of non-linearity in the relationship between the two variables:
+
+```{r}
+ggplot(Boston) +
+    geom_point(aes(x = lstat, y = medv), alpha = .75)
+```
+
+
+First we start by creating a `parsnip` specification for linear regression.
+
+```{r}
+lm_spec <- linear_reg() %>%
+    set_mode('regression') %>%
+    set_engine('lm')
+
+lm_spec
+```
+
+The specification doesn't perform any calculations by itself, it is just a specification of what we want to do.
+
+Once we have the specification, we can `fit`it by supplying a formula expression (in the form `y ~ x`) and the data.
+
+```{r}
+lm_fit <- lm_spec %>%
+    fit(medv ~ lstat, data = Boston)
+
+lm_fit
+```
+
+The result is a `parsnip` object, which contains the underlying fit as well as some parsnip-related information.
+
+```{r}
+names(lm_fit)
+```
+
+The fit results are stored in the data frame `fit`
+
+```{r}
+lm_fit$fit
+```
+
+For more detailed information we can pass the data frame to `summary`, which gives us p-values and standard errors for the coefficients, as well as the $R^2$ and $F$ statistics.
+
+```{r}
+summary(lm_fit$fit)
+```
+
+Another way to extract information in a tidy way is to use the helper functions from `broom`, passing directly the `parsnip` object.  
+The `tidy` function returns the parameters estimates:
+
+```{r}
+tidy(lm_fit)
+```
+
+and `glance` can be used to extract the model statistics:
+
+```{r}
+glance(lm_fit)
+```
+
+The `predict` function can be used to get the predicted data.
+
+```{r}
+predict(lm_fit, new_data = Boston) %>%
+    head()
+```
+
+We can also return other types of predictions by specifying the `type` argument. For example, setting `type = conf_int` returns a 95% confidence interval.
+
+```{r}
+predict(lm_fit, new_data = Boston, type = 'conf_int') %>%
+    head()
+```
+
+In order to evaluate the performance of the model, we can compare the observed and the predicted values.
+
+```{r}
+bind_cols(predict(lm_fit, new_data = Boston),
+          Boston) %>%
+    select(medv, .pred) %>%
+    ggplot() +
+    geom_point(aes(x = .pred, y = medv), alpha = .5)
+```
+
+The same results can be obtained with the `augment` function from `tune`.
+
+```{r}
+augment(lm_fit, new_data = Boston) %>%
+    select(medv, .pred) %>%
+    ggplot() +
+    geom_point(aes(x = .pred, y = medv), alpha = .5)
+```
+
+## Multiple Linear Regression
+
+The multiple linear regression model can be fit in much the same way as the previous simple linear regression model. The only difference is how we specify the predictors, using the formula method, but adding several variables by separating them with `+`.
+
+```{r}
+lm_fit2 <- lm_spec %>% # same parsnip spec as before
+    fit(medv ~ lstat + age, data = Boston)
+
+lm_fit2
+```
+
+All the previous helper functions work the same. From extracting parameters:
+
+```{r}
+tidy(lm_fit2)
+```
+
+to predicting new values
+
+```{r}
+predict(lm_fit2, new_data = Boston) %>%
+    head()
+```
+
+The `Boston` data set contains 13 variables, and so it would be cumbersome to type all of them in order to perform a regression using all the predictors. Instead we can use the notation `y ~ .`
+
+```{r}
+lm_fit3 <- lm_spec %>%
+    fit(medv ~ ., data = Boston)
+
+lm_fit3
+```
+
+```{r}
+glance(lm_fit3)
+```
+
+If we want to perform a regression using all the variables except one, we can use the formula notation adding a `-` before the variable we don't want to use.
+
+```{r, eval=FALSE}
+lm_spec %>%
+    fit(medv ~ . -age, data = Boston)
+```
+
+## Interaction terms
+
+Including an interaction term can be done directly inside the formula notation using the syntax `lstat:black` to include an interaction term between `lastat` and `black` variables. The syntax `lstat*age` is a shorthand for `lstat + age + lstat:age`.
+`Tidymodels` allow us to apply transformations as a pre-processing step, using `recipe`.
+We use the `step_interact` to specify the interaction term. Next we create a workflow object to combine the model specification `lm_spec` with the pre-processing specification `rec_spec_interact` which can be fitted like a `parsnip` model.
+
+```{r}
+rec_spec_interact <- recipe(medv ~ lstat + age, data = Boston) %>%
+    step_interact(~ lstat:age)
+
+lm_wf_interact <- workflow() %>%
+    add_model(lm_spec) %>%
+    add_recipe(rec_spec_interact)
+
+lm_wf_interact %>% fit(data = Boston)
+```
+
+## Non-linear transformation of the predictors
+
+In base R the transformation can be done directly inside the formula notation, using the function `I()`.  
+IN tidymodels this transformations are part of the pre-processing and thus are added to a *recipe*. The `recipe` package has the `step_mutate` function which is pretty much the equivalent of `mutate` in `dplyr`.
+
+In general you would want to keep as much of the pre-processing inside `recipe` such that the transformations will be applied consistently to new data.
+
+```{r}
+rec_spec_pow2 <- recipe(medv ~ lstat, data = Boston) %>%
+    step_mutate(lstat2 = lstat ^ 2) # ploy 2 to lstat variable
+
+lm_wf_pow2 <- workflow() %>%
+    add_model(lm_spec) %>%
+    add_recipe(rec_spec_pow2)
+
+lm_wf_pow2 %>% fit(Boston)
+```
+
+Not all the transformations need to be done with `step_mutate` since `recipe` has a bunch of them creted already. For example `step_log` take the logarithm of the variables.
+
+```{r}
+rec_spec_log <- recipe(medv ~ lstat, data = Boston) %>%
+    step_log(lstat)
+
+lm_wf_log <- workflow() %>%
+    add_model(lm_spec) %>%
+    add_recipe(rec_spec_log)
+
+lm_wf_log %>% fit(Boston)
+```
+
+## Qualitative predictors
+
+The following example is based on the `Carseta` data set from the package `ISLR`. We will predict `Sales` of child car seats in 400 locations based on a number of predictors. 
+
+```{r}
+head(Carseats)
+```
+
+
+One of those variables, `ShelveLoc`, is a qualitative predictor that indicates the quality of the shelving location. It can take three possible values:
+
+* Bad
+* Medium
+* Good
+
+If you pass such variable to `lm` it will read it and generate dummy variables using the following convention:
+
+```{r}
+Carseats %>%
+    pull(ShelveLoc) %>%
+    contrasts()
+```
+
+The problem is that not all the underlying engines know how to deal with qualitative variables, so we need a way to manage them before the model fitting. `recipe` has different function to deal with this kind of situation.  
+The `step_dummy` will perform the transformation of turning one qualitative variable with x levels into x-1 dummy variables. In the example below we^re also using the `all_nominal_predictors` function to execute the transformation on the character and factor variables.
+
+```{r}
+rec_spec <- recipe(Sales ~ ., data = Carseats) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_interact(~ Income:Advertising + Price:Age)
+
+lm_wf <- workflow() %>%
+    add_model(lm_spec) %>%
+    add_recipe(rec_spec)
+
+lm_wf %>% fit(Carseats)
+```
+
+# Classification
+
+## Stock Market data
+
+We need the `discrim` package for the discriminant analysis.
+
+```{r, message=FALSE}
+library(discrim)
+```
+
+We will be examining the `Smarket` data set, which contains a number of numeric variables plus a variable called `Direction` which has the two labels *Up* and *Down*.
+
+```{r}
+head(Smarket)
+```
+
+Let's take a look at the correlation of the data, removing `Direction` as it is not numeric.
+
+```{r}
+cor_Smarket <- Smarket %>%
+    select(-Direction) %>%
+    cor()
+
+GGally::ggcorr(cor_Smarket, label = TRUE)
+```
+
+As shown by the corplot, the variables are more or less uncorrelated, except for `Year` and `Volume`.  
+If we plot the two variables we can see that there is an upward trend in `Volume` with time.
+
+```{r}
+ggplot(Smarket, aes(x = Year, y = Volume)) +
+    geom_jitter(height = 0, alpha = .5)
+```
+
+##♣ Logistic Regression
+
+We will fit a *logistic regression* with the aid of `parsnip`.
+
+```{r}
+lr_spec <- logistic_reg() %>%
+    set_engine('glm') %>%
+    set_mode('classification')
+
+lr_spec
+```
+
+We cannot fit directly the model. We want to model the `Direction` of the stock market based on the percentage return from the previous 5 days plus the volume of the shares traded. `parsnip` requires that the response variable is factor, which is the case for this data set, so we don't need to do any change.
+
+```{r}
+lr_fit <- lr_spec %>%
+    fit(Direction ~ . - Year - Today, data = Smarket)
+
+lr_fit
+```
+
+The model's main infor could be accessed with `summary`:
+
+```{r}
+summary(lr_fit$fit)
+```
+
+Or we can use the `tidy` function to extract some of these parameters.
+
+```{r}
+tidy(lr_fit)
+```
+
