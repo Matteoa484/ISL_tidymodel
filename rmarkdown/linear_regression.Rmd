@@ -362,3 +362,45 @@ augment(lr_fit, new_data = Smarket) %>%
     accuracy(truth = Direction, estimate = .pred_class)
 ```
 
+To have more information about the model performance, let's split up the data, train it on some of it and then evaluate it on the remaining part. Since we are working with data that has a time component, it makes sense to fit the model using the first year's worth of data and evaluate it on the last year.
+
+```{r}
+Smarket_train <- Smarket %>% filter(Year != 2005)
+
+Smarket_test <- Smarket %>% filter(Year == 2005)
+
+# fit a logistic regression on the train data
+lr_fit2 <- lr_spec %>%
+    fit(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume,
+        data = Smarket_train)
+
+# Evaluate on the testing data set (confusion matrix)
+augment(lr_fit2, new_data = Smarket_test) %>%
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+```{r}
+# Evaluate on the testing data set (accuracy)
+augment(lr_fit2, new_data = Smarket_test) %>%
+    accuracy(truth = Direction, estimate = .pred_class)
+```
+
+We see that the model performs worse than the previous one.
+
+Considering the logistic regression model had underwhelming p-values, let see what happens if we remove some of the variables that appear not to be helpful.
+
+```{r}
+lr_fit3 <- lr_spec %>%
+    fit(Direction ~ Lag1 + Lag2, data = Smarket_train)
+
+augment(lr_fit3, new_data = Smarket_test) %>%
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+```{r}
+# Evaluate on the testing data set (accuracy)
+augment(lr_fit3, new_data = Smarket_test) %>%
+    accuracy(truth = Direction, estimate = .pred_class)
+```
+
+And we see an increase in performance. The model is still not perfect but it is starting to perform better.
