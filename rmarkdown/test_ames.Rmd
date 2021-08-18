@@ -1,0 +1,201 @@
+---
+title: "test Ames"
+date: "8/18/2021"
+output: 
+  html_document:
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is a test on the Ames data set, using different machine learning models.
+
+## Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(AmesHousing)
+library(ggplot2)
+library(tidymodels)
+library(dplyr)
+library(patchwork)
+library(kableExtra)
+```
+
+## Functions
+
+```{r functions}
+
+tidy_tbl <- function(fit_obj) {
+    
+    data_tbl <- fit_obj %>%
+        broom::tidy()
+  
+    
+
+    table <- data_tbl %>%
+        kbl() %>%
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                      full_width = FALSE,
+                      position = 'left') %>%
+        column_spec(5, color = 'white',
+                    background = spec_color(data_tbl$p.value,
+                                            begin = .2, end = .7,
+                                            option = 'D',
+                                            direction = -1))
+  
+    return(table)
+  
+}
+
+```
+
+## Data
+
+All residential home sales in Ames, Iowa between 2006 and 2010. The data set contains many explanatory variables on the quality and quantity of physical attributes of residential homes in Iowa sold between 2006 and 2010. Most of the variables describe information a typical home buyer would like to know about a property (square footage, number of bedrooms and bathrooms, size of lot, etc.). A detailed discussion of variables can be found in the original paper referenced below.
+
+*De Cock D. 2011. Ames, Iowa: Alternative to the Boston Housing Data as an End of Semester Regression Project. Journal of Statistics Education; 19(3)*
+
+The data is loaded into the package `AmesHousing`; it allows the user to work on the raw data (`ames_raw`) or on a pre-processed data set (`make_ames`), which is the one used in this example.
+
+The raw data set is comprised of 82 fields (*variables*) recorded for 2.930 properties in Ames IA (*observations*).
+
+For the processed version a summary of the differences between these data sets and `ames_raw` is:
+
+* All factors are unordered.  
+* PID and Order are removed.  
+* Spaces and special characters in column names where changed to snake case. To be consistent, SalePrice was changed to Sale_Price.  
+* Many factor levels were changed to be more understandable (e.g. Split_or_Multilevel instead of 080)  
+* Many missing values were reset. For example, if the variable Bsmt_Qual was  missing, this implies that there is no basement on the property. Instead of a  missing value, the value of Bsmt_Qual was changed to No_Basement. Similarly,  numeric data pertaining to basements were set to zero where appropriate such as  variables Bsmt_Full_Bath and Total_Bsmt_SF.  
+* Garage_Yr_Blt contained many missing data and was removed.  
+* Approximate longitude and latitude are included for the properties. Also, note  that there are 6 properties with identical geotags. These are units within the same building. For some properties, updated versions of the PID identifiers were found  and are replaced with new values.
+
+```{r}
+ames <- make_ames()
+```
+
+## EDA
+
+Some basic EDA on the data set.
+
+```{r}
+skimr::skim(ames)
+```
+
+```{r}
+glimpse(ames)
+```
+
+```{r}
+head(ames)
+```
+
+The **target variable** is `Sale_Price`. Below its distribution.
+
+```{r, message=FALSE, warning=FALSE}
+px_dist <- ames %>%
+    select(Sale_Price) %>%
+    ggplot(aes(x = Sale_Price)) +
+    geom_histogram(bins = 60, alpha = .75, fill = 'steelblue') +
+    geom_vline(xintercept = median(ames$Sale_Price),
+               color = 'red', lty = 'dashed') +
+    geom_vline(xintercept = mean(ames$Sale_Price),
+               color = 'darkgreen', lty = 'solid') +
+    scale_x_continuous(labels = scales::label_number(),
+                       breaks = scales::breaks_pretty(n = 7),
+                       expand = c(0.01, 0.01)) +
+    labs(title = 'Sale Prices') +
+    theme_minimal()
+
+px_dist
+```
+
+The histogram shows that the most common selling level to be around \$160'000 (*median*) and the average selling price to be \$180'000 (*mean*). The plot shows also a right skewed distribution which suggest there are concern with an assumption of normality. To solve this problem it is better to log-transform the variable.  
+Before changing the data set, it's better to visualize the same distribution after a log-transformation.
+
+```{r, message=FALSE, warning=FALSE}
+px_log_dist <- px_dist +
+    scale_x_log10(labels = scales::label_number(),
+                  expand = c(0.01, 0.01)) +
+    labs(title = 'Log-Sale Prices')
+
+px_dist | px_log_dist
+```
+
+The log-transformation helps to meet normality assumption and helps to see a couple of outliers, with one observation where the `Sale_Price` is close to zero.
+
+A good way to check for outliers is the box-plot:
+
+```{r}
+ames %>%
+    select(Sale_Price) %>%
+    ggplot(aes(x = 'var', y = Sale_Price)) +
+    geom_boxplot(outlier.alpha = .4) +
+    geom_jitter(alpha = .1, width = .3) +
+    scale_y_log10(labels = scales::label_number(),
+                       breaks = quantile(ames$Sale_Price)) +
+    labs(title = 'Sale Price Box-Plot') +
+    theme_minimal()
+    
+```
+
+Next check the correlation between variables, to control for potential collinearity.
+
+```{r}
+ames %>%
+    select_if(is.numeric) %>%
+    cor(use = 'complete.obs') %>%
+    GGally::ggcorr(label_size = 2, legend.position = 'bottom')
+```
+
+## test / train
+
+```{r}
+ames <- ames %>%
+    mutate(Sale_Price = log(Sale_Price))
+
+ames_split <- initial_split(ames, strata = Sale_Price, prop = .7)
+
+ames_train <- training(ames_split)
+ames_test  <- testing(ames_split)
+```
+
+
+
+
+
+
+## Linear Regression
+
+First set the model
+
+```{r}
+lm_spec <- linear_reg() %>%
+    set_mode('regression') %>%
+    set_engine('lm')
+```
+
+Add first simple recipe, which keeps only numeric cols (it converts nominal cols into id variable).
+
+```{r}
+lm_num_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+    update_role(all_nominal(), new_role = 'id variable')
+```
+
+Workflow & fit
+
+```{r}
+lm_num_wf <- workflow() %>%
+    add_recipe(lm_num_rec) %>%
+    add_model(lm_spec)
+
+lm_num_fit <- fit(lm_num_wf, data = ames_train)
+```
+
+```{r}
+tidy_tbl(lm_num_fit)
+```
+
