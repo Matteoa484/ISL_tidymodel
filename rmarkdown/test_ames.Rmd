@@ -119,7 +119,7 @@ px_dist
 The histogram shows that the most common selling level to be around \$160'000 (*median*) and the average selling price to be \$180'000 (*mean*). The plot shows also a right skewed distribution which suggest there are concern with an assumption of normality. To solve this problem it is better to log-transform the variable.  
 Before changing the data set, it's better to visualize the same distribution after a log-transformation.
 
-```{r, message=FALSE, warning=FALSE}
+```{r, message=FALSE, warning=FALSE, fig.width=10}
 px_log_dist <- px_dist +
     scale_x_log10(labels = scales::label_number(),
                   expand = c(0.01, 0.01)) +
@@ -147,7 +147,7 @@ ames %>%
 
 Next check the correlation between variables, to control for potential collinearity.
 
-```{r}
+```{r ames_corplot, fig.align='center', out.width='80%'}
 ames %>%
     select_if(is.numeric) %>%
     cor(use = 'complete.obs') %>%
@@ -207,13 +207,13 @@ augment(lin_reg_fit, new_data = ames_test) %>%
 ## Ridge Regression
 ***
 
-*Ridge Regression* controls the coefficients by adding **FORMULA** to the objective function. This penalty parameter is also referred to al "$L_2$" as it signifies a second-order penalty being used on the coefficients.
+*Ridge regression* is very similar to OLS, except that the coefficients are estimated by minimizing a different quantity. The *ridge regression* coefficients are the values that minimize
 
-**BIG FORMULA**
+$$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda \sum^p_{j=1} \beta^2_j = RSS + \lambda \sum^p_{j=1} \beta^2_j$$
 
-This penalty parameters can take a wide range of values, which is controlled by the tuning parameter $\lambda$. When $\lambda = 0$ there is no effect and our objective function equals the normal OLS regression objective function of simply minimizing the SSE.. However when $\lambda \rightarrow \infty$, the penalty becomes large and forces our coefficients to zero.
+where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficient estimates will approach zero.
 
-We will use the `glm` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elasticnet regularization (between 0 and 1).  
+We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elasticnet regularization (between 0 and 1).  
 When using the `glm` engine, we also need to set a *penalty* to fit the model.
 
 ```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
