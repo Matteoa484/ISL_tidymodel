@@ -1,9 +1,7 @@
 ---
 title: "test Ames"
 date: "8/18/2021"
-output: 
-  html_document:
-    df_print: kable
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -11,10 +9,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Introduction
+***
 
 This is a test on the Ames data set, using different machine learning models.
 
 ## Libraries
+***
 
 ```{r libraries, message=FALSE, warning=FALSE}
 library(AmesHousing)
@@ -26,6 +26,7 @@ library(kableExtra)
 ```
 
 ## Functions
+***
 
 ```{r functions}
 
@@ -54,6 +55,7 @@ tidy_tbl <- function(fit_obj) {
 ```
 
 ## Data
+***
 
 All residential home sales in Ames, Iowa between 2006 and 2010. The data set contains many explanatory variables on the quality and quantity of physical attributes of residential homes in Iowa sold between 2006 and 2010. Most of the variables describe information a typical home buyer would like to know about a property (square footage, number of bedrooms and bathrooms, size of lot, etc.). A detailed discussion of variables can be found in the original paper referenced below.
 
@@ -78,6 +80,7 @@ ames <- make_ames()
 ```
 
 ## EDA
+***
 
 Some basic EDA on the data set.
 
@@ -151,51 +154,140 @@ ames %>%
     GGally::ggcorr(label_size = 2, legend.position = 'bottom')
 ```
 
-## test / train
+## Data Partition
+***
 
-```{r}
-ames <- ames %>%
-    mutate(Sale_Price = log(Sale_Price))
-
+```{r data_partition, message=FALSE}
+# main split (stratified Sale_Price)
 ames_split <- initial_split(ames, strata = Sale_Price, prop = .7)
 
+# train and test data sets
 ames_train <- training(ames_split)
 ames_test  <- testing(ames_split)
+
+# cross-validation data set (n = 10) from train 
+ames_folds <- vfold_cv(ames_train, v = 10)
 ```
 
-
-
-
-
-
 ## Linear Regression
+***
 
-First set the model
+Basic fit of all predictors vs log-sale prices. This is going to be the benchmark. Using `recipe::step_log` to log-transform the target variable in order to reduce skeweness and `recipe::step_dummy` to convert nominal values to dummy variables.
 
-```{r}
+
+```{r lin_reg_model, message=FALSE}
+# set the model
 lm_spec <- linear_reg() %>%
     set_mode('regression') %>%
     set_engine('lm')
-```
 
-Add first simple recipe, which keeps only numeric cols (it converts nominal cols into id variable).
+# set the recipe
+lin_reg_rec <-
+    recipe(Sale_Price ~ ., data = ames_train) %>%
+    step_log(Sale_Price, skip = TRUE) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_zv(all_predictors())
 
-```{r}
-lm_num_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
-    update_role(all_nominal(), new_role = 'id variable')
-```
-
-Workflow & fit
-
-```{r}
-lm_num_wf <- workflow() %>%
-    add_recipe(lm_num_rec) %>%
+# create model fitting workflow
+lin_reg_wf <- workflow() %>%
+    add_recipe(lin_reg_rec) %>%
     add_model(lm_spec)
+  
+# fit the model on the training data
+lin_reg_fit <- fit(lin_reg_wf, data = ames_train)
 
-lm_num_fit <- fit(lm_num_wf, data = ames_train)
+# get RMSE on test data as base for models comparison
+augment(lin_reg_fit, new_data = ames_test) %>%
+    rmse(truth = Sale_Price, estimate = .pred)
+```
+
+## Ridge Regression
+***
+
+*Ridge Regression* controls the coefficients by adding **FORMULA** to the objective function. This penalty parameter is also referred to al "$L_2$" as it signifies a second-order penalty being used on the coefficients.
+
+**BIG FORMULA**
+
+This penalty parameters can take a wide range of values, which is controlled by the tuning parameter $\lambda$. When $\lambda = 0$ there is no effect and our objective function equals the normal OLS regression objective function of simply minimizing the SSE.. However when $\lambda \rightarrow \infty$, the penalty becomes large and forces our coefficients to zero.
+
+We will use the `glm` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elasticnet regularization (between 0 and 1).  
+When using the `glm` engine, we also need to set a *penalty* to fit the model.
+
+```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
+# set test model spec (penalty not-tuned)
+ridge_spec <- linear_reg(mixture = 0, penalty = 0) %>%
+    set_mode('regression') %>%
+    set_engine('glmnet')
+
+# fit on train data
+ridge_fit <- ridge_spec %>%
+    fit(Sale_Price ~ ., ames_train)
+
+# plot coefficients regularization
+ridge_fit %>%
+    extract_fit_engine() %>%
+    plot(xvar = 'lambda')
+```
+
+The *penalty* value is a tunable one; we can fit multiple models with different values and check which one is the best. To tune it we need a workflow object containing the model and preprocessor, an rset object containing the resamples to be fitted and a tibble containing the parameter values to be evaluated.
+
+```{r, message=FALSE}
+# set model spec
+ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
+    set_mode('regression') %>%
+    set_engine('glmnet')
+
+# set recipe (no target log-transformation)
+ridge_rec <-
+    recipe(Sale_Price ~ ., data = ames_train) %>%
+    step_novel(all_nominal_predictors()) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_zv(all_predictors()) %>%
+    step_normalize(all_predictors())
+
+# set workflow
+ridge_wf <- workflow() %>%
+    add_recipe(ridge_rec) %>%
+    add_model(ridge_spec)
+
+# create the 'penalty' grid search for tuning
+penalty_grid <- grid_regular(penalty(range = c(-5, 5)),
+                             levels = 50)
+
+# tune ridge penalty hyperparameter
+ridge_tune <- tune_grid(ridge_wf,
+                        resamples = ames_folds,
+                        grid      = penalty_grid)
+```
+
+```{r, fig.align='center'}
+autoplot(ridge_tune)
 ```
 
 ```{r}
-tidy_tbl(lm_num_fit)
+ridge_tune %>%
+    collect_metrics()
+```
+
+```{r ridge_vip_plot, fig.align='center'}
+ridge_rmse <- ridge_tune %>% select_best('rmse')
+
+final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
+
+final_ridge %>%
+    fit(ames_train) %>%
+    extract_fit_parsnip() %>%
+    vip::vi(lambda = ridge_rmse$penalty) %>%
+    mutate(Importance = abs(Importance),
+           Variable   = forcats::fct_reorder(Variable, Importance)) %>%
+    top_n(n = 25, wt = Importance) %>%
+    ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+    geom_col() +
+    scale_x_continuous(expand = c(0, 0)) +
+    labs(title = 'Top 25 variables by Importance')
+```
+
+```{r}
+last_fit(final_ridge, ames_split) %>% collect_metrics()
 ```
 
