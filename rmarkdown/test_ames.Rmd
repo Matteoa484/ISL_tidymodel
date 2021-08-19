@@ -396,7 +396,7 @@ doParallel::registerDoParallel()
 set.seed(2020)
 
 # tune elastic net model
-elnet_tune <- tune_grid(el_net_wf,
+elnet_tune <- tune_grid(elnet_wf,
                         resamples = ames_folds,
                         grid      = elnet_grid)
 
