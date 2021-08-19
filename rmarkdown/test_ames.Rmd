@@ -158,6 +158,9 @@ ames %>%
 ***
 
 ```{r data_partition, message=FALSE}
+# set seed for reproductibility
+set.seed(123)
+
 # main split (stratified Sale_Price)
 ames_split <- initial_split(ames, strata = Sale_Price, prop = .7)
 
@@ -289,5 +292,119 @@ final_ridge %>%
 
 ```{r}
 last_fit(final_ridge, ames_split) %>% collect_metrics()
+```
+
+## Lasso Regression
+***
+
+Use mixture = 1 in glmnet.
+
+```{r lasso_lamba_plot, cache=TRUE, fig.align='center'}
+# set test model spec (penalty not-tuned)
+lasso_spec <- linear_reg(mixture = 1, penalty = 0) %>%
+    set_mode('regression') %>%
+    set_engine('glmnet')
+
+# fit on train data
+lasso_fit <- lasso_spec %>%
+    fit(Sale_Price ~ ., ames_train)
+
+# plot coefficients regularization
+lasso_fit %>%
+    extract_fit_engine() %>%
+    plot(xvar = 'lambda')
+```
+
+
+We can re-use the ridge recipe in the lasso workflow
+
+```{r}
+lasso_spec <- linear_reg(mixture = 1, penalty = tune()) %>%
+    set_mode('regression') %>%
+    set_engine('glmnet')
+
+lasso_wf <- workflow() %>%
+    add_recipe(ridge_rec) %>%
+    add_model(lasso_spec)
+
+penalty_grid <- grid_regular(penalty(range = c(-3, 3)),
+                             levels = 50)
+
+lasso_tune <- tune_grid(lasso_wf,
+                        resamples = ames_folds,
+                        grid      = penalty_grid)
+
+```
+
+```{r, fig.align='center'}
+autoplot(lasso_tune)
+```
+
+```{r, fig.align='center', out.width='80%'}
+lasso_penalty <- lasso_tune %>% select_best(metric = 'rmse')
+
+final_lasso <- finalize_workflow(lasso_wf, lasso_penalty)
+
+final_lasso %>%
+    fit(data = ames_train) %>%
+    extract_fit_parsnip() %>%
+    vip::vi(lambda = lasso_penalty$penalty) %>%
+    mutate(Importance = abs(Importance),
+           Variable   = forcats::fct_reorder(Variable, Importance)) %>%
+    top_n(n = 25, wt = Importance) %>%
+    ggplot(aes(x = Importance, y = Variable, color = Sign)) +
+    geom_point() +
+    scale_x_continuous(expand = c(0, 0)) +
+    labs(title = 'Top 25 Influential Variables', y = '') +
+    theme_minimal()
+```
+
+```{r}
+last_fit(final_lasso, ames_split) %>% collect_metrics()
+```
+
+## Elastic Net
+***
+
+*Elastic Net* is a generalization of the ridge and lasso models, which combines the two penalties:
+
+**BIG FORMULA**
+
+The advantage of *elastic net* model is that it enables effective regularization via the ridge penalty with the feature selection characteristic of the lasso penalty.
+
+In risge and lasso models $\lambda$ is the primary tuning parameter, but with elastic nets, we want to tune the $\lambda$ and the `mixture` parameters.
+
+```{r}
+# set elatic net model
+elnet_spec <- linear_reg(mixture = tune(), penalty = tune()) %>%
+    set_mode('regression') %>%
+    set_engine('glmnet')
+
+# workflow (use ridge recipe)
+elnet_wf <- workflow() %>%
+    add_recipe(ridge_rec) %>%
+    add_model(elnet_spec)
+
+# hyper-parameters grid
+elnet_grid <- grid_regular(mixture(range = c(0, 1)),
+                           penalty(range = c(-3, 3)),
+                           levels = c(10, 40))
+# activate parallel computing
+doParallel::registerDoParallel()
+
+# set seed for reproducibility
+set.seed(2020)
+
+# tune elastic net model
+elnet_tune <- tune_grid(el_net_wf,
+                        resamples = ames_folds,
+                        grid      = elnet_grid)
+
+# plot RMSE / R-squared
+autoplot(elnet_tune)
+```
+
+```{r}
+elnet_tune %>% select_best('rmse')
 ```
 
