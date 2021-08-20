@@ -52,6 +52,19 @@ tidy_tbl <- function(fit_obj) {
   
 }
 
+
+## Function to plot the frequency of nominal variables
+nom_bar_plot <- function(dataset, col, title) {
+  
+  col <- sym(col)
+  
+  ggplot(dataset, aes(y = forcats::fct_infreq(!!col))) +
+      geom_bar(fill = 'steelblue', alpha = .5) +
+      labs(title = title, x = '', y = '') +
+      theme_minimal()
+
+}
+
 ```
 
 ## Data
@@ -79,81 +92,6 @@ For the processed version a summary of the differences between these data sets a
 ames <- make_ames()
 ```
 
-## EDA
-***
-
-Some basic EDA on the data set.
-
-```{r}
-skimr::skim(ames)
-```
-
-```{r}
-glimpse(ames)
-```
-
-```{r}
-head(ames)
-```
-
-The **target variable** is `Sale_Price`. Below its distribution.
-
-```{r, message=FALSE, warning=FALSE}
-px_dist <- ames %>%
-    select(Sale_Price) %>%
-    ggplot(aes(x = Sale_Price)) +
-    geom_histogram(bins = 60, alpha = .75, fill = 'steelblue') +
-    geom_vline(xintercept = median(ames$Sale_Price),
-               color = 'red', lty = 'dashed') +
-    geom_vline(xintercept = mean(ames$Sale_Price),
-               color = 'darkgreen', lty = 'solid') +
-    scale_x_continuous(labels = scales::label_number(),
-                       breaks = scales::breaks_pretty(n = 7),
-                       expand = c(0.01, 0.01)) +
-    labs(title = 'Sale Prices') +
-    theme_minimal()
-
-px_dist
-```
-
-The histogram shows that the most common selling level to be around \$160'000 (*median*) and the average selling price to be \$180'000 (*mean*). The plot shows also a right skewed distribution which suggest there are concern with an assumption of normality. To solve this problem it is better to log-transform the variable.  
-Before changing the data set, it's better to visualize the same distribution after a log-transformation.
-
-```{r, message=FALSE, warning=FALSE, fig.width=10}
-px_log_dist <- px_dist +
-    scale_x_log10(labels = scales::label_number(),
-                  expand = c(0.01, 0.01)) +
-    labs(title = 'Log-Sale Prices')
-
-px_dist | px_log_dist
-```
-
-The log-transformation helps to meet normality assumption and helps to see a couple of outliers, with one observation where the `Sale_Price` is close to zero.
-
-A good way to check for outliers is the box-plot:
-
-```{r}
-ames %>%
-    select(Sale_Price) %>%
-    ggplot(aes(x = 'var', y = Sale_Price)) +
-    geom_boxplot(outlier.alpha = .4) +
-    geom_jitter(alpha = .1, width = .3) +
-    scale_y_log10(labels = scales::label_number(),
-                       breaks = quantile(ames$Sale_Price)) +
-    labs(title = 'Sale Price Box-Plot') +
-    theme_minimal()
-    
-```
-
-Next check the correlation between variables, to control for potential collinearity.
-
-```{r ames_corplot, fig.align='center', out.width='80%'}
-ames %>%
-    select_if(is.numeric) %>%
-    cor(use = 'complete.obs') %>%
-    GGally::ggcorr(label_size = 2, legend.position = 'bottom')
-```
-
 ## Data Partition
 ***
 
@@ -172,6 +110,109 @@ ames_test  <- testing(ames_split)
 set.seed(456)
 # cross-validation data set (n = 10) from train 
 ames_folds <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
+```
+
+
+## EDA
+***
+
+Some basic EDA on the data set.
+
+```{r}
+skimr::skim(ames_train)
+```
+
+```{r}
+glimpse(ames_train)
+```
+
+```{r}
+head(ames_train)
+```
+
+### Target Variable
+
+The **target variable** is `Sale_Price`. Below its distribution.
+
+```{r, message=FALSE, warning=FALSE, fig.align='center', out.width='80%'}
+px_dist <- ames_train %>%
+    select(Sale_Price) %>%
+    ggplot(aes(x = Sale_Price)) +
+    geom_histogram(bins = 60, alpha = .75, fill = 'steelblue') +
+    geom_vline(xintercept = median(ames$Sale_Price),
+               color = 'red', lty = 'dashed') +
+    geom_vline(xintercept = mean(ames$Sale_Price),
+               color = 'darkgreen', lty = 'solid') +
+    scale_x_continuous(labels = scales::label_number(),
+                       breaks = scales::breaks_pretty(n = 7),
+                       expand = c(0.01, 0.01)) +
+    labs(title = 'Sale Prices') +
+    theme_minimal()
+
+px_dist
+```
+
+The histogram shows that the most common selling level to be around \$160'000 (*median*) and the average selling price to be \$180'000 (*mean*). The plot shows also a right skewed distribution which suggest there are concern with an assumption of normality. To solve this problem it could be better to log-transform the variable.  
+
+```{r, message=FALSE, warning=FALSE, fig.width=10, fig.align='center'}
+px_log_dist <- px_dist +
+    scale_x_log10(labels = scales::label_number(),
+                  expand = c(0.01, 0.01)) +
+    labs(title = 'Log-Sale Prices')
+
+px_dist | px_log_dist
+```
+
+The log-transformation helps to meet normality assumption, highlighting a couple of interesting information. The log-transformed distribution appears to be slightly multimodal and it helps us to see a couple of outliers, with one observation where the `Sale_Price` is close to zero.
+
+Next check the correlation between variables, to control for potential collinearity.
+
+```{r ames_corplot, fig.align='center', out.width='80%'}
+ames_train %>%
+    select_if(is.numeric) %>%
+    cor(use = 'complete.obs') %>%
+    GGally::ggcorr(label_size = 2, legend.position = 'bottom')
+```
+
+### Nominal Variables
+
+The data set has 46 columns which are nominal (all encoded as factors).
+
+```{r}
+ames_train %>%
+    select_if(is.factor) %>%
+    glimpse()
+```
+
+#### Garage Variables
+
+There are 4 columns on *garage* which are nominal:
+
+* Garage type (`Garage_Type`): garage location
+* Garage finish (`Garage_Finish`): interior finish of the garage
+* Garage quality (`Garage_Qual`): garage quality
+* Garage condition (`Garage_Cond`): garage condition
+
+```{r garage_bar_plot, fig.align='center', out.width='80%'}
+p1 <- nom_bar_plot(ames_train, 'Garage_Type', 'garage type')
+p2 <- nom_bar_plot(ames_train, 'Garage_Finish', 'garage finish')
+p3 <- nom_bar_plot(ames_train, 'Garage_Qual', 'garage quality')
+p4 <- nom_bar_plot(ames_train, 'Garage_Cond', 'garage condition')
+
+
+(p1 + p2) / (p3 + p4)
+```
+
+#### Basement Variables
+
+```{r, fig.align='center', out.width='80%', fig.asp=0.85}
+p1 <- nom_bar_plot(ames_train, 'Bsmt_Qual', 'quality')
+p2 <- nom_bar_plot(ames_train, 'Bsmt_Cond', 'condition')
+p3 <- nom_bar_plot(ames_train, 'Bsmt_Exposure', 'exposure')
+p4 <- nom_bar_plot(ames_train, 'BsmtFin_Type_1', 'type 1')
+p5 <- nom_bar_plot(ames_train, 'BsmtFin_Type_2', 'type 2')
+
+wrap_plots(p1, p2, p3, p4, p5, ncol = 3)
 ```
 
 ## Linear Regression
