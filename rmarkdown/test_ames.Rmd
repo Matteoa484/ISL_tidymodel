@@ -285,7 +285,7 @@ ames_train %>%
 Basic fit of all predictors vs log-sale prices. This is going to be the benchmark. Using `recipe::step_log` to log-transform the target variable in order to reduce skeweness and `recipe::step_dummy` to convert nominal values to dummy variables.
 
 
-```{r lin_reg_model, message=FALSE}
+```{r lin_reg_model, message=FALSE, fig.align='center', out.width='80%'}
 # set the model
 lm_spec <- linear_reg() %>%
     set_mode('regression') %>%
@@ -294,7 +294,7 @@ lm_spec <- linear_reg() %>%
 # set the recipe
 lin_reg_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_log(Sale_Price, skip = TRUE) %>%
+    step_log(Sale_Price, base = 10, skip = TRUE) %>%
     step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors())
@@ -309,7 +309,14 @@ lin_reg_fit <- fit(lin_reg_wf, data = ames_train)
 
 # get RMSE on test data as base for models comparison
 augment(lin_reg_fit, new_data = ames_test) %>%
-    rmse(truth = Sale_Price, estimate = .pred)
+    select(Sale_Price, .pred) %>%
+    mutate(.pred = 10^.pred) %>%
+    ggplot(aes(x = Sale_Price, y = .pred)) +
+    geom_point(alpha = .4) +
+    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
+    scale_x_continuous(labels = scales::number_format()) +
+    scale_y_continuous(labels = scales::number_format()) +
+    theme_minimal()
 ```
 
 ## Ridge Regression
@@ -321,8 +328,8 @@ $$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda
 
 where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficient estimates will approach zero.
 
-We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elasticnet regularization (between 0 and 1).  
-When using the `glm` engine, we also need to set a *penalty* to fit the model.
+We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elastic net regularization (between 0 and 1).  
+When using the `glmnet` engine, we also need to set a *penalty* to fit the model.
 
 ```{r ridge_lamba_plot, eval=FALSE, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
@@ -348,9 +355,11 @@ ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
     set_mode('regression') %>%
     set_engine('glmnet')
 
-# set recipe (no target log-transformation)
+# set recipe
 ridge_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
+    step_log(Sale_Price, base = 10, skip = TRUE) %>%
+    step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_novel(all_nominal_predictors()) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors()) %>%
@@ -386,7 +395,7 @@ ridge_tune %>%
     show_best(metric = 'rmse')
 ```
 
-```{r ridge_vip_plot, fig.align='center'}
+```{r ridge_vip_plot, fig.align='center', fig.asp=0.85}
 ridge_rmse <- ridge_tune %>% select_best('rmse')
 
 final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
@@ -412,6 +421,7 @@ last_fit(final_ridge, ames_split) %>% collect_metrics()
 final_ridge %>%
     last_fit(ames_split) %>%
     collect_predictions() %>%
+    mutate(.pred = 10^.pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
     geom_point(alpha = .3) +
     geom_abline(lty = 2, color = 'gray50', size = 1.2) +
@@ -454,7 +464,7 @@ lasso_wf <- workflow() %>%
     add_recipe(ridge_rec) %>%
     add_model(lasso_spec)
 
-penalty_grid <- grid_regular(penalty(range = c(-3, 3)),
+penalty_grid <- grid_regular(penalty(range = c(-5, 5)),
                              levels = 50)
 
 lasso_tune <- tune_grid(lasso_wf,
@@ -467,7 +477,7 @@ lasso_tune <- tune_grid(lasso_wf,
 autoplot(lasso_tune)
 ```
 
-```{r, fig.align='center', out.width='80%'}
+```{r, fig.align='center', out.width='80%', fig.asp=0.85}
 lasso_penalty <- lasso_tune %>% select_best(metric = 'rmse')
 
 final_lasso <- finalize_workflow(lasso_wf, lasso_penalty)
@@ -486,8 +496,17 @@ final_lasso %>%
     theme_minimal()
 ```
 
-```{r}
-last_fit(final_lasso, ames_split) %>% collect_metrics()
+```{r, fig.align='center', out.width='80%'}
+final_lasso %>%
+    last_fit(ames_split) %>%
+    collect_predictions() %>%
+    mutate(.pred = 10^.pred) %>%
+    ggplot(aes(x = Sale_Price, y = .pred)) +
+    geom_point(alpha = .3) +
+    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
+    theme_minimal() +
+    scale_x_continuous(labels = scales::number_format()) +
+    scale_y_continuous(labels = scales::number_format())
 ```
 
 ## Elastic Net
@@ -514,10 +533,10 @@ elnet_wf <- workflow() %>%
 
 # hyper-parameters grid
 elnet_grid <- grid_regular(mixture(range = c(0, 1)),
-                           penalty(range = c(-3, 3)),
+                           penalty(range = c(-5, 5)),
                            levels = c(10, 40))
 # activate parallel computing
-doParallel::registerDoParallel()
+#doParallel::registerDoParallel()
 
 # set seed for reproducibility
 set.seed(2020)
@@ -531,7 +550,11 @@ elnet_tune <- tune_grid(elnet_wf,
 autoplot(elnet_tune)
 ```
 
-```{r}
-elnet_tune %>% select_best('rmse')
+```{r, collapse=TRUE}
+# best 5 models by R-sq
+elnet_tune %>% show_best('rsq')
+
+# best 5 models by RMSE
+elnet_tune %>% show_best('rmse')
 ```
 
