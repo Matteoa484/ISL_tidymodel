@@ -116,7 +116,7 @@ ames_folds <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
 ## EDA
 ***
 
-Some basic EDA on the data set.
+Some basic EDA on the training data set.
 
 ```{r}
 skimr::skim(ames_train)
@@ -203,6 +203,46 @@ p4 <- nom_bar_plot(ames_train, 'Garage_Cond', 'garage condition')
 (p1 + p2) / (p3 + p4)
 ```
 
+From the plot above, we see that there are 2 variables which are heavily concentrated in just one factor (`Garage_Qual` and `Garage_Cond`).
+
+```{r, collapse=TRUE}
+# garage quality frequency table
+ames_train %>% janitor::tabyl(Garage_Qual)
+
+# garage condition frequency table
+ames_train %>% janitor::tabyl(Garage_Cond)
+```
+
+Both variables have the '*typical*' class which weights ~90%. There are two solutions to this problem: cancel the columns or lump all the factors below a certain threshold.
+
+```{r, collapse=TRUE}
+# garage quality
+ames_train %>%
+    mutate(Garage_Qual = forcats::fct_lump_prop(Garage_Qual, prop = 0.05)) %>%
+    janitor::tabyl(Garage_Qual)
+
+# garage condition
+ames_train %>%
+    mutate(Garage_Cond = forcats::fct_lump_prop(Garage_Cond, prop = 0.05)) %>%
+    janitor::tabyl(Garage_Cond)
+```
+
+A less problematic variable is `Garage_Type`, where the factors are more spread apart.
+
+```{r, collapse=TRUE}
+# garage type frequency table
+ames_train %>% janitor::tabyl(Garage_Type)
+```
+
+In this case a factor lump with a 5% threshold should be fine
+
+```{r, collapse=TRUE}
+ames_train %>%
+    mutate(Garage_Type = forcats::fct_lump_prop(Garage_Type, prop = 0.05)) %>%
+    janitor::tabyl(Garage_Type)
+```
+
+
 #### Basement Variables
 
 ```{r, fig.align='center', out.width='80%', fig.asp=0.85}
@@ -214,6 +254,30 @@ p5 <- nom_bar_plot(ames_train, 'BsmtFin_Type_2', 'type 2')
 
 wrap_plots(p1, p2, p3, p4, p5, ncol = 3)
 ```
+
+Basemend condition and basement type 2 seems to be variables with too much values in just one factor.
+
+```{r, collapse=TRUE}
+# bsm condition frequency table
+ames_train %>% janitor::tabyl(Bsmt_Cond)
+
+# bsm condition frequency with factor lump
+ames_train %>%
+    mutate(Bsmt_Cond = forcats::fct_lump_prop(Bsmt_Cond, prop = 0.05)) %>%
+    janitor::tabyl(Bsmt_Cond)
+```
+
+```{r, collapse=TRUE}
+# bsm type2 frequency table
+ames_train %>% janitor::tabyl(BsmtFin_Type_2)
+
+# bsm type2 frequency with factor lump
+ames_train %>%
+    mutate(BsmtFin_Type_2 = forcats::fct_lump_prop(BsmtFin_Type_2, 
+                                                   prop = 0.05)) %>%
+    janitor::tabyl(BsmtFin_Type_2)
+```
+
 
 ## Linear Regression
 ***
@@ -231,6 +295,7 @@ lm_spec <- linear_reg() %>%
 lin_reg_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_log(Sale_Price, skip = TRUE) %>%
+    step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors())
 
@@ -259,7 +324,7 @@ where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coeffici
 We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elasticnet regularization (between 0 and 1).  
 When using the `glm` engine, we also need to set a *penalty* to fit the model.
 
-```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
+```{r ridge_lamba_plot, eval=FALSE, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
 ridge_spec <- linear_reg(mixture = 0, penalty = 0) %>%
     set_mode('regression') %>%
