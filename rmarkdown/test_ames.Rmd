@@ -158,7 +158,7 @@ ames %>%
 ***
 
 ```{r data_partition, message=FALSE}
-# set seed for reproductibility
+# set seed for reproducibility
 set.seed(123)
 
 # main split (stratified Sale_Price)
@@ -168,8 +168,10 @@ ames_split <- initial_split(ames, strata = Sale_Price, prop = .7)
 ames_train <- training(ames_split)
 ames_test  <- testing(ames_split)
 
+# set seed for reproducibility
+set.seed(456)
 # cross-validation data set (n = 10) from train 
-ames_folds <- vfold_cv(ames_train, v = 10)
+ames_folds <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
 ```
 
 ## Linear Regression
@@ -258,6 +260,9 @@ penalty_grid <- grid_regular(penalty(range = c(-5, 5)),
                              levels = 50)
 
 # tune ridge penalty hyperparameter
+doParallel::registerDoParallel()
+set.seed(111)
+
 ridge_tune <- tune_grid(ridge_wf,
                         resamples = ames_folds,
                         grid      = penalty_grid)
@@ -267,9 +272,12 @@ ridge_tune <- tune_grid(ridge_wf,
 autoplot(ridge_tune)
 ```
 
-```{r}
+```{r ridge_show_metrics, collapse=TRUE}
 ridge_tune %>%
-    collect_metrics()
+    show_best(metric = 'rsq')
+
+ridge_tune %>%
+    show_best(metric = 'rmse')
 ```
 
 ```{r ridge_vip_plot, fig.align='center'}
@@ -278,8 +286,8 @@ ridge_rmse <- ridge_tune %>% select_best('rmse')
 final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
 
 final_ridge %>%
-    fit(ames_train) %>%
-    extract_fit_parsnip() %>%
+    last_fit(ames_split) %>%
+    extract_fit_engine() %>%
     vip::vi(lambda = ridge_rmse$penalty) %>%
     mutate(Importance = abs(Importance),
            Variable   = forcats::fct_reorder(Variable, Importance)) %>%
@@ -293,6 +301,19 @@ final_ridge %>%
 ```{r}
 last_fit(final_ridge, ames_split) %>% collect_metrics()
 ```
+
+```{r, fig.align='center', out.width='80%'}
+final_ridge %>%
+    last_fit(ames_split) %>%
+    collect_predictions() %>%
+    ggplot(aes(x = Sale_Price, y = .pred)) +
+    geom_point(alpha = .3) +
+    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
+    theme_minimal() +
+    scale_x_continuous(labels = scales::number_format()) +
+    scale_y_continuous(labels = scales::number_format())
+```
+
 
 ## Lasso Regression
 ***
