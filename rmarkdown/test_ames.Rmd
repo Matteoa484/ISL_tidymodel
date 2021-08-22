@@ -56,15 +56,18 @@ tidy_tbl <- function(fit_obj) {
 ## Function to plot the frequency of nominal variables
 nom_bar_plot <- function(dataset, col, title) {
   
-  col <- sym(col)
-  
+  if(is.character(col)) {
+      col <- sym(col)
+  } else {
+      col <- enquo(col)
+  }
+
   ggplot(dataset, aes(y = forcats::fct_infreq(!!col))) +
       geom_bar(fill = 'steelblue', alpha = .5) +
-      labs(title = title, x = '', y = '') +
+      labs(title = glue::glue('{col}'), x = '', y = '') +
       theme_minimal()
 
 }
-
 ```
 
 ## Data
@@ -194,10 +197,10 @@ There are 4 columns on *garage* which are nominal:
 * Garage condition (`Garage_Cond`): garage condition
 
 ```{r garage_bar_plot, fig.align='center', out.width='80%'}
-p1 <- nom_bar_plot(ames_train, 'Garage_Type', 'garage type')
-p2 <- nom_bar_plot(ames_train, 'Garage_Finish', 'garage finish')
-p3 <- nom_bar_plot(ames_train, 'Garage_Qual', 'garage quality')
-p4 <- nom_bar_plot(ames_train, 'Garage_Cond', 'garage condition')
+p1 <- nom_bar_plot(ames_train, 'Garage_Type')
+p2 <- nom_bar_plot(ames_train, 'Garage_Finish')
+p3 <- nom_bar_plot(ames_train, 'Garage_Qual')
+p4 <- nom_bar_plot(ames_train, 'Garage_Cond')
 
 
 (p1 + p2) / (p3 + p4)
@@ -246,11 +249,11 @@ ames_train %>%
 #### Basement Variables
 
 ```{r, fig.align='center', out.width='80%', fig.asp=0.85}
-p1 <- nom_bar_plot(ames_train, 'Bsmt_Qual', 'quality')
-p2 <- nom_bar_plot(ames_train, 'Bsmt_Cond', 'condition')
-p3 <- nom_bar_plot(ames_train, 'Bsmt_Exposure', 'exposure')
-p4 <- nom_bar_plot(ames_train, 'BsmtFin_Type_1', 'type 1')
-p5 <- nom_bar_plot(ames_train, 'BsmtFin_Type_2', 'type 2')
+p1 <- nom_bar_plot(ames_train, 'Bsmt_Qual')
+p2 <- nom_bar_plot(ames_train, 'Bsmt_Cond')
+p3 <- nom_bar_plot(ames_train, 'Bsmt_Exposure')
+p4 <- nom_bar_plot(ames_train, 'BsmtFin_Type_1')
+p5 <- nom_bar_plot(ames_train, 'BsmtFin_Type_2')
 
 wrap_plots(p1, p2, p3, p4, p5, ncol = 3)
 ```
@@ -282,33 +285,49 @@ ames_train %>%
 ## Linear Regression
 ***
 
+Compare two model, one raw and one pre-processed
+
 Basic fit of all predictors vs log-sale prices. This is going to be the benchmark. Using `recipe::step_log` to log-transform the target variable in order to reduce skeweness and `recipe::step_dummy` to convert nominal values to dummy variables.
 
 
-```{r lin_reg_model, message=FALSE, fig.align='center', out.width='80%'}
+```{r lin_reg_model, message=FALSE, fig.align='center', out.width='90%'}
 # set the model
-lm_spec <- linear_reg() %>%
+lr_spec <- linear_reg() %>%
     set_mode('regression') %>%
     set_engine('lm')
 
-# set the recipe
-lin_reg_rec <-
+# fit a raw linear regression to the train test set
+raw_lr_fit <- lr_spec %>%
+    fit(Sale_Price ~ ., data = ames_train)
+
+# set the pre-processing recipe
+lr_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_log(Sale_Price, base = 10, skip = TRUE) %>%
     step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_dummy(all_nominal_predictors()) %>%
-    step_zv(all_predictors())
+    step_nzv(all_predictors())
 
 # create model fitting workflow
-lin_reg_wf <- workflow() %>%
-    add_recipe(lin_reg_rec) %>%
-    add_model(lm_spec)
+lr_wf <- workflow() %>%
+    add_recipe(lr_rec) %>%
+    add_model(lr_spec)
   
 # fit the model on the training data
-lin_reg_fit <- fit(lin_reg_wf, data = ames_train)
+preproc_lr_fit <- fit(lr_wf, data = ames_train)
 
-# get RMSE on test data as base for models comparison
-augment(lin_reg_fit, new_data = ames_test) %>%
+# prediction plot on raw model
+raw_pred_plot <- augment(raw_lr_fit, new_data = ames_train) %>%
+    select(Sale_Price, .pred) %>%
+    ggplot(aes(x = Sale_Price, y = .pred)) +
+    geom_point(alpha = .4) +
+    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
+    scale_x_continuous(labels = scales::number_format()) +
+    scale_y_continuous(labels = scales::number_format()) +
+    theme_minimal()
+
+# prediction plot on pre-processed model
+preproc_pred_plot <- augment(preproc_lr_fit, new_data = ames_train) %>%
     select(Sale_Price, .pred) %>%
     mutate(.pred = 10^.pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
@@ -317,7 +336,19 @@ augment(lin_reg_fit, new_data = ames_test) %>%
     scale_x_continuous(labels = scales::number_format()) +
     scale_y_continuous(labels = scales::number_format()) +
     theme_minimal()
+
+wrap_plots(raw_pred_plot, preproc_pred_plot)
 ```
+
+```{r}
+# the log-transformation on preproc is a problem
+# for the statistics
+bind_rows(
+    glance(raw_lr_fit),
+    glance(preproc_lr_fit)
+)
+```
+
 
 ## Ridge Regression
 ***
@@ -331,7 +362,7 @@ where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coeffici
 We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elastic net regularization (between 0 and 1).  
 When using the `glmnet` engine, we also need to set a *penalty* to fit the model.
 
-```{r ridge_lamba_plot, eval=FALSE, cache=TRUE, fig.align='center'}
+```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
 ridge_spec <- linear_reg(mixture = 0, penalty = 0) %>%
     set_mode('regression') %>%
