@@ -79,6 +79,13 @@ All residential home sales in Ames, Iowa between 2006 and 2010. The data set con
 
 The data is loaded into the package `AmesHousing`; it allows the user to work on the raw data (`ames_raw`) or on a pre-processed data set (`make_ames`), which is the one used in this example.
 
+```{r}
+ames <- make_ames()
+
+# log-transform target variable
+ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
+```
+
 The raw data set is comprised of 82 fields (*variables*) recorded for 2.930 properties in Ames IA (*observations*).
 
 For the processed version a summary of the differences between these data sets and `ames_raw` is:
@@ -91,19 +98,30 @@ For the processed version a summary of the differences between these data sets a
 * Garage_Yr_Blt contained many missing data and was removed.  
 * Approximate longitude and latitude are included for the properties. Also, note  that there are 6 properties with identical geotags. These are units within the same building. For some properties, updated versions of the PID identifiers were found  and are replaced with new values.
 
-```{r}
-ames <- make_ames()
-```
-
 ## Data Partition
 ***
+
+At the start of a project, there's usually a finite pool of data available. The idea of *data spending* is an important first consideration when modeling, especially as it relates to empirical validation.
+
+If the initial pool of data available is not huge, there will be some overlap of how and when the data is spent or allocated.
+
+The primary approach is to *split* the existing data into two distinct sets:
+
+* *Training Set*: usually the majority of the data, it is used to develop and optimize the model; these data are sandbox for model building, where different models can be fit, feature engineering strategies are investigated and so on.
+* *Test Set*: the remaining portion of observations; it is held in reserve until one or two models are chosen as the most likely to succeed. The *test set* is then used as the final arbiter to determine the efficacy of the models.
+
+Tidymodels allows to make random sampling splits with `rsample::initial_split`, which takes as arguments the data set to be splitted and the training proportion. Once the `rsplit` object is created, the *training* and *testing* sets can be created with `rsample::training()` and `rsample::testing` functions.  
+The outputs are data frame with the same columns as the original data, but only the appropriate rows for each set.
+
+Simple random sampling is appropriate in many cases, but when there is a dramatic *class imbalance* (one class / value occurs much less frequently than another) using a simple random sample may allocate those infrequently samples disproportionately into the training or testing set. To avoid this, *stratified sampling* can be used; the training/testing split is conducted separately within each class and then these sub-samples are combined into the overall training and testing set.  
+For regression problems, the outcome data can be artificially binned into quartiles and then stratified sampling conducted four separate times. This is an effective method for keeping the distribution of the outcome similar between the training and test set. In `rsample` the stratified variable can be selected using the option `strata = variable_name`.
 
 ```{r data_partition, message=FALSE}
 # set seed for reproducibility
 set.seed(123)
 
-# main split (stratified Sale_Price)
-ames_split <- initial_split(ames, strata = Sale_Price, prop = .7)
+# main split (stratified by Sale_Price)
+ames_split <- initial_split(ames, strata = Sale_Price, prop = .8)
 
 # train and test data sets
 ames_train <- training(ames_split)
@@ -296,56 +314,95 @@ lr_spec <- linear_reg() %>%
     set_mode('regression') %>%
     set_engine('lm')
 
-# fit a raw linear regression to the train test set
-raw_lr_fit <- lr_spec %>%
-    fit(Sale_Price ~ ., data = ames_train)
 
-# set the pre-processing recipe
-lr_rec <-
+## Set different recipes
+
+# basic
+basic_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_log(Sale_Price, base = 10, skip = TRUE) %>%
+    step_dummy(all_nominal_predictors())
+    
+# factor lump + near-zero variance
+fct_rec <-
+    recipe(Sale_Price ~ ., data = ames_train) %>%
     step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_nzv(all_predictors())
 
-# create model fitting workflow
-lr_wf <- workflow() %>%
-    add_recipe(lr_rec) %>%
-    add_model(lr_spec)
-  
-# fit the model on the training data
-preproc_lr_fit <- fit(lr_wf, data = ames_train)
+# fit both models
+basic_lr <- workflow() %>%
+    add_recipe(basic_rec) %>%
+    add_model(lr_spec) %>%
+    fit(data = ames_train)
 
+preproc_lr <- workflow() %>%
+    add_recipe(fct_rec) %>%
+    add_model(lr_spec) %>%
+    fit(data = ames_train)
+
+
+## create model fitting workflows
+
+# # recipe list
+# preproc <- list(basic =  basic_rec,
+#                 factor = fct_rec)
+# 
+# # create different models
+# lr_models <- workflow_set(preproc = preproc,
+#                           models  = list(lr = lr_spec),
+#                           cross   = FALSE)
+# 
+# ## 
+# keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+# 
+# lr_multi_test <- lr_models %>%
+#     workflow_map(seed = 1101, verbose = TRUE,
+#                  resamples = ames_folds, control = keep_pred)
+# 
+# lr_models %>% fit(data = ames_train)
+# 
+# 
+# collect_metrics(lr_multi_test) %>%
+#     filter(.metric == 'rsq')
+
+
+  
 # prediction plot on raw model
-raw_pred_plot <- augment(raw_lr_fit, new_data = ames_train) %>%
+basic_pred_plot <- augment(basic_lr, new_data = ames_train) %>%
     select(Sale_Price, .pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
     geom_point(alpha = .4) +
     geom_abline(lty = 2, color = 'gray50', size = 1.2) +
     scale_x_continuous(labels = scales::number_format()) +
     scale_y_continuous(labels = scales::number_format()) +
+    coord_obs_pred() +
     theme_minimal()
 
 # prediction plot on pre-processed model
-preproc_pred_plot <- augment(preproc_lr_fit, new_data = ames_train) %>%
+preproc_pred_plot <- augment(preproc_lr, new_data = ames_train) %>%
     select(Sale_Price, .pred) %>%
-    mutate(.pred = 10^.pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
     geom_point(alpha = .4) +
     geom_abline(lty = 2, color = 'gray50', size = 1.2) +
     scale_x_continuous(labels = scales::number_format()) +
     scale_y_continuous(labels = scales::number_format()) +
+    coord_obs_pred() +
     theme_minimal()
 
-wrap_plots(raw_pred_plot, preproc_pred_plot)
+wrap_plots(basic_pred_plot, preproc_pred_plot)
 ```
+
+```{r}
+rmse(basic_lr$fit, truth = Sale_Price, estimate = .pred)
+```
+
 
 ```{r}
 # the log-transformation on preproc is a problem
 # for the statistics
 bind_rows(
-    glance(raw_lr_fit),
-    glance(preproc_lr_fit)
+    glance(basic_lr),
+    glance(preproc_lr)
 )
 ```
 
