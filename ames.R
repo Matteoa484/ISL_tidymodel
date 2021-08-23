@@ -70,19 +70,64 @@ lr_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors())
     
-## workflows
-lr_wf <- workflow() %>%
-    add_model(lr_spec) %>%
-    add_recipe(lr_rec)
+
+## recipe prop
+test_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Qual, Garage_Cond, Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.05) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+
+## recipe prop2
+test2_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Qual, Garage_Cond, Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+## recipe prop3 - best so far
+test3_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Cond, Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
+  step_rm(Garage_Qual) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+
+## recipe prop4
+test4_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Cond, Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
+  step_rm(Garage_Qual, Garage_Cond) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+add_rec <- function(model_rec) {
   
-## fits model
-lr_fit <- fit(lr_wf, data = ames_train)
+  workflow() %>%
+    add_model(lr_spec) %>%
+    add_recipe(model_rec)
+  
+}
 
-## get performance stats
-preds <- augment(lr_fit, new_data = ames_train)
+models <- list('base linear' = lr_rec,
+               'recipe 1' = test_rec,
+               'recipe 2' =  test2_rec,
+               'recipe 3' = test3_rec,
+               'recipe 4' = test4_rec) %>%
+    purrr::map(~add_rec(.)) %>%
+    purrr::map(fit, data = ames_train)
 
-preds %>%
-    ames_met(truth = Sale_Price, estimate = .pred)
+
+# apply augment function to all data frame in list
+purrr::imap_dfr(models, augment, new_data = ames_train, .id = 'model') %>%
+  group_by(model) %>%
+  ames_met(truth = Sale_Price, estimate = .pred)
 
 
 
