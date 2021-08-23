@@ -90,20 +90,20 @@ test2_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
 
 ## recipe prop3 - best so far
 test3_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_rm(Garage_Qual) %>%
   step_novel(all_nominal_predictors()) %>%
   step_other(Garage_Cond, Garage_Type, Condition_1,
              MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
-  step_rm(Garage_Qual) %>%
   step_dummy(all_nominal_predictors()) %>%
   step_zv(all_predictors())
 
 
 ## recipe prop4
 test4_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
-  step_novel(all_nominal_predictors()) %>%
-  step_other(Garage_Cond, Garage_Type, Condition_1,
-             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
   step_rm(Garage_Qual, Garage_Cond) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
   step_dummy(all_nominal_predictors()) %>%
   step_zv(all_predictors())
 
