@@ -311,3 +311,32 @@ pls_grid <- grid_regular(num_comp(c(1, 20)), levels = 10)
 pls_tune <- tune_grid(pls_wf,
                       resamples = ames_fold,
                       grid      = pls_grid)
+
+
+
+# Random Forest -----------------------------------------------------------
+
+## Model spec
+randf_spec <- rand_forest(mtry = 27) %>%
+    set_engine('randomForest') %>%
+    set_mode('regression')
+
+## Recipe
+randf_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+    step_novel(all_nominal_predictors())
+
+## Workflows
+randf_wf <- workflow() %>%
+    add_model(randf_spec) %>%
+    add_recipe(randf_rec)
+
+## Tune
+
+# create the 'penalty' grid search for tuning
+
+
+randf_fit <- fit(randf_wf, data = ames_train)
+
+
+
+models <- append(models, list('random forest' = randf_fit))
