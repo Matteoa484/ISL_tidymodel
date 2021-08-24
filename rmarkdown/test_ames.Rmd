@@ -522,6 +522,14 @@ final_ridge %>%
 ## Lasso Regression
 ***
 
+The *least absolute shrinkage and selection operator* (lasso) model is an alternative to ridge regression that has a small modification to the penalty in the objective function. Rather than the $L_2$ penalty it uses the $L_1$ penalty $\lambda\sum^p_{j=1}|\beta_j|$ in the objective function.
+
+The lasso coefficients are the ones that minimize the function:
+
+$$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda \sum^p_{j=1} |\beta_j| = RSS + \lambda \sum^p_{j=1} |\beta_j|$$
+
+Whereas the ridge regression approach pushes variables to approximately but not equal to zero, the lasso penalty will actually push coefficients to zero. Thus the lasso model not only improves the model with regularization but it also conducts automated feature selection.
+
 Use mixture = 1 in glmnet.
 
 ```{r lasso_lamba_plot, cache=TRUE, fig.align='center'}

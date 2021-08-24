@@ -20,10 +20,6 @@ tidymodels_prefer()
 # create cleaned ames data frame
 ames <- make_ames()
 
-# log-transform target variable
-ames <- ames %>%
-    mutate(Sale_Price = log10(Sale_Price))
-
 
 
 # Train/test sets ---------------------------------------------------------
@@ -49,12 +45,78 @@ ames_fold <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
 # Metrics & Misc ----------------------------------------------------------
 
 # set which metrics to use
-ames_met <- metric_set(rmse, rsq, mae)
+ames_met <- metric_set(rmse, mae)
 
 # parallel computing
 doParallel::registerDoParallel()
 
 
+
+# Test EDA plots & tables -------------------------------------------------
+
+## Function to plot the frequency of nominal variables
+nom_bar_plot <- function(dataset, col) {
+  
+    if(is.character(col)) {
+        col <- sym(col)
+    } else {
+        col <- enquo(col)
+    }
+    
+    ggplot(dataset, aes(y = forcats::fct_infreq(!!col))) +
+        geom_bar(fill = 'steelblue', alpha = .5) +
+        labs(title = glue::glue('{col}'), x = '', y = '') +
+        theme_minimal()
+  
+}
+
+
+targ_num_plot <- function(dataset, target_var, other_var) {
+  
+    t_var <- enquo(target_var)
+    o_var <- enquo(other_var)
+    
+    ggplot(dataset, aes(x = !!o_var, y = !!t_var)) +
+        geom_point(alpha = .5)
+  
+  
+}
+
+
+c('Garage_Type', 'Garage_Finish', 'Garage_Qual', 'Garage_Cond') %>%
+    purrr::map(~nom_bar_plot(dataset = ames_train, col = .)) %>%
+    patchwork::wrap_plots()
+
+
+c('MS_SubClass', 'MS_Zoning', 'Street', 'Alley', 'Lot_Shape') %>%
+  purrr::map(~nom_bar_plot(dataset = ames_train, col = .)) %>%
+  patchwork::wrap_plots()
+
+nom_bar_plot(ames_train, 'Neighborhood')
+
+targ_num_plot(ames_train, Sale_Price, Total_Bsmt_SF)
+
+
+targ_num_plot(ames_train, Sale_Price, First_Flr_SF) + 
+    scale_x_log10()
+
+targ_num_plot(ames_train, Sale_Price, Pool_Area)
+
+
+
+ames_train %>%
+    ggplot(aes(x = Sale_Price, y = Gr_Liv_Area)) +
+    geom_point(alpha = .5)
+
+ames_train %>%
+  ggplot(aes(x = Sale_Price)) +
+  geom_histogram(alpha = .7) +
+  facet_wrap(~ Overall_Qual) +
+    scale_x_continuous(labels = scales::number_format())
+
+
+ames_train %>%
+    naniar::vis_miss()
 
 # Linear Regression -------------------------------------------------------
 
@@ -88,7 +150,7 @@ test2_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
   step_dummy(all_nominal_predictors()) %>%
   step_zv(all_predictors())
 
-## recipe prop3 - best so far
+## recipe prop3
 test3_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
   step_rm(Garage_Qual) %>%
   step_novel(all_nominal_predictors()) %>%
@@ -107,6 +169,82 @@ test4_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
   step_dummy(all_nominal_predictors()) %>%
   step_zv(all_predictors())
 
+
+## recipe prop5 - best so far
+test5_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_rm(Garage_Qual, Garage_Cond) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+
+## recipe prop6
+test6_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  step_rm(Garage_Qual, Garage_Cond) %>%
+  step_log(Gr_Liv_Area, First_Flr_SF, base = 10) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_other(Garage_Type, Condition_1,
+             MS_SubClass, Bsmt_Cond,threshold = 0.02) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors())
+
+## simple 1
+simp1_rec <- recipe(Sale_Price ~ Gr_Liv_Area, data = ames_train)
+
+## simple 2
+simp2_rec <- 
+    recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF, data = ames_train) %>%
+    step_log(Gr_Liv_Area, base = 10)
+
+## simple 3
+simp3_rec <- 
+  recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF + Overall_Qual, 
+         data = ames_train) %>%
+  step_poly(Gr_Liv_Area, Second_Flr_SF, degree = 2) %>%
+  step_dummy(all_nominal_predictors())
+
+## simple 4
+simp4_rec <- 
+  recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF + Overall_Qual + Total_Bsmt_SF, 
+         data = ames_train) %>%
+  step_poly(Gr_Liv_Area, Second_Flr_SF, degree = 2) %>%
+  step_dummy(all_nominal_predictors())
+
+
+## simple 5
+simp5_rec <- 
+  recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF + Overall_Qual + 
+           Total_Bsmt_SF + Neighborhood, 
+         data = ames_train) %>%
+  step_poly(Gr_Liv_Area, Second_Flr_SF, degree = 2) %>%
+  step_dummy(all_nominal_predictors())
+
+
+## simple 6
+simp6_rec <- 
+  recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF + Overall_Qual + 
+           Total_Bsmt_SF + Neighborhood, 
+         data = ames_train) %>%
+  step_poly(Gr_Liv_Area, Second_Flr_SF, degree = 2) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors())
+
+
+## simple 7
+simp7_rec <- 
+  recipe(Sale_Price ~ Gr_Liv_Area + Second_Flr_SF + Overall_Qual + 
+           Total_Bsmt_SF + Neighborhood + Garage_Cars, 
+         data = ames_train) %>%
+  step_poly(Gr_Liv_Area, Second_Flr_SF, degree = 2) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors())
+
+
+
+
 add_rec <- function(model_rec) {
   
   workflow() %>%
@@ -116,10 +254,14 @@ add_rec <- function(model_rec) {
 }
 
 models <- list('base linear' = lr_rec,
-               'recipe 1' = test_rec,
-               'recipe 2' =  test2_rec,
-               'recipe 3' = test3_rec,
-               'recipe 4' = test4_rec) %>%
+               'recipe 5' = test5_rec,
+               'simple 1' = simp1_rec,
+               'simple 2' = simp2_rec,
+               'simple 3' = simp3_rec,
+               'simple 4' = simp4_rec,
+               'simple 5' = simp5_rec,
+               'simple 6' = simp6_rec,
+               'simple 7' = simp7_rec) %>%
     purrr::map(~add_rec(.)) %>%
     purrr::map(fit, data = ames_train)
 
@@ -128,6 +270,16 @@ models <- list('base linear' = lr_rec,
 purrr::imap_dfr(models, augment, new_data = ames_train, .id = 'model') %>%
   group_by(model) %>%
   ames_met(truth = Sale_Price, estimate = .pred)
+
+
+test_wf <- workflow() %>%
+    add_model(lr_spec) %>%
+    add_recipe(test2_rec)
+
+lr_cv <- fit_resamples(test_wf, resamples = ames_fold, metrics = ames_met)
+
+collect_metrics(lr_cv)
+
 
 
 
@@ -141,11 +293,7 @@ ridge_spec <-
 
 ## Recipe
 ridge_rec <-
-    recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_novel(all_nominal_predictors()) %>%
-    step_other(all_nominal_predictors(), threshold = 0.05) %>%
-    step_dummy(all_nominal_predictors()) %>%
-    step_zv(all_predictors()) %>%
+    test5_rec %>%
     step_normalize(all_predictors())
 
 
@@ -173,6 +321,28 @@ best_ridge <- select_best(ridge_tune, metric = 'rmse') %>%
     fit(data = ames_train)
 
 
+best_ridge %>%
+  extract_fit_engine() %>%
+  vip::vi(lambda = select_best(ridge_tune, metric = 'rmse')$penalty) %>%
+  top_n(n = 25, wt = abs(Importance)) %>%
+  ggplot(aes(x = Importance, y = reorder(Variable, Importance), fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(title = 'Top 25 variables by Importance')
+
+
+best_ridge %>%
+  extract_fit_engine() %>%
+  vip::vip(lambda = select_best(ridge_tune, metric = 'rmse')$penalty,
+           mapping = aes(fill = Sign))
+
+
+
+best_ridge %>%
+  extract_fit_engine() %>%
+  vip::vip(mapping = aes(fill = Sign))
+
+
 ## Compare performance
 
 # build named list
@@ -185,6 +355,8 @@ purrr::imap_dfr(models, augment, new_data = ames_train, .id = 'model') %>%
     ames_met(truth = Sale_Price, estimate = .pred)
 
 
+ridge_cv <- fit_resamples(best_ridge, resamples = ames_fold, metrics = ames_met)
+collect_metrics(ridge_cv)
 
 # Lasso Regression --------------------------------------------------------
 
@@ -218,6 +390,16 @@ lasso_tune <- tune_grid(lasso_wf,
 best_lasso <- select_best(lasso_tune, metric = 'rmse') %>%
     finalize_workflow(x = lasso_wf, parameters = .) %>%
     fit(data = ames_train)
+
+
+best_lasso %>%
+  extract_fit_engine() %>%
+  vip::vi(lambda = select_best(lasso_tune, metric = 'rmse')$penalty) %>%
+  top_n(n = 25, wt = abs(Importance)) %>%
+  ggplot(aes(x = Importance, y = reorder(Variable, Importance), fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(title = 'Top 25 variables by Importance')
 
 
 ## Compare performance
@@ -359,10 +541,38 @@ pls_tune <- tune_grid(pls_wf,
 
 
 
+
+# Polynomial Regression ---------------------------------------------------
+
+## Model spec
+# same as linear model
+
+## Recipe
+poly_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+    step_poly(all_numeric_predictors(), degree = 2) %>%
+    step_novel(all_nominal_predictors()) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_zv(all_predictors())
+
+## Workflow
+poly_wf <- workflow() %>%
+    add_model(lr_spec) %>%
+    add_recipe(poly_rec)
+
+
+## Fit
+poly_fit <- fit(poly_wf, data = ames_train)
+
+poly_fit %>%
+    augment(new_data = ames_train) %>%
+    ames_met(truth = Sale_Price, estimate = .pred)
+
+
+
 # Random Forest -----------------------------------------------------------
 
 ## Model spec
-randf_spec <- rand_forest(mtry = 27) %>%
+randf_spec <- rand_forest() %>%
     set_engine('randomForest') %>%
     set_mode('regression')
 
@@ -382,6 +592,8 @@ randf_wf <- workflow() %>%
 
 randf_fit <- fit(randf_wf, data = ames_train)
 
+
+randf_fit %>% extract_fit_engine() %>% plot()
 
 
 models <- append(models, list('random forest' = randf_fit))
