@@ -549,7 +549,7 @@ pls_tune <- tune_grid(pls_wf,
 
 ## Recipe
 poly_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_poly(all_numeric_predictors(), degree = 2) %>%
+    step_poly(all_numeric_predictors(), degree = tune()) %>%
     step_novel(all_nominal_predictors()) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors())
@@ -558,6 +558,15 @@ poly_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
 poly_wf <- workflow() %>%
     add_model(lr_spec) %>%
     add_recipe(poly_rec)
+
+## Tune
+
+# manually create a grid
+poly_grid <- expand.grid(1:10)
+
+poly_tune <-tune_grid(poly_wf,
+                      resamples = ames_fold,
+                      grid = poly_grid)
 
 
 ## Fit
