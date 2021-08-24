@@ -79,11 +79,8 @@ All residential home sales in Ames, Iowa between 2006 and 2010. The data set con
 
 The data is loaded into the package `AmesHousing`; it allows the user to work on the raw data (`ames_raw`) or on a pre-processed data set (`make_ames`), which is the one used in this example.
 
-```{r}
+```{r make_data}
 ames <- make_ames()
-
-# log-transform target variable
-ames <- ames %>% mutate(Sale_Price = log10(Sale_Price))
 ```
 
 The raw data set is comprised of 82 fields (*variables*) recorded for 2.930 properties in Ames IA (*observations*).
@@ -308,104 +305,35 @@ Compare two model, one raw and one pre-processed
 Basic fit of all predictors vs log-sale prices. This is going to be the benchmark. Using `recipe::step_log` to log-transform the target variable in order to reduce skeweness and `recipe::step_dummy` to convert nominal values to dummy variables.
 
 
-```{r lin_reg_model, message=FALSE, fig.align='center', out.width='90%'}
-# set the model
+```{r lin_reg_model, message=FALSE, warning=FALSE, collapse=TRUE}
+# Model Spec
 lr_spec <- linear_reg() %>%
     set_mode('regression') %>%
     set_engine('lm')
 
 
-## Set different recipes
-
-# basic
-basic_rec <-
+## Recipe
+lr_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_dummy(all_nominal_predictors())
-    
-# factor lump + near-zero variance
-fct_rec <-
-    recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
-    step_dummy(all_nominal_predictors()) %>%
-    step_nzv(all_predictors())
-
-# fit both models
-basic_lr <- workflow() %>%
-    add_recipe(basic_rec) %>%
-    add_model(lr_spec) %>%
-    fit(data = ames_train)
-
-preproc_lr <- workflow() %>%
-    add_recipe(fct_rec) %>%
-    add_model(lr_spec) %>%
-    fit(data = ames_train)
 
 
-## create model fitting workflows
+## Workflow
+lr_wf <- workflow() %>%
+    add_recipe(lr_rec) %>%
+    add_model(lr_spec)
 
-# # recipe list
-# preproc <- list(basic =  basic_rec,
-#                 factor = fct_rec)
-# 
-# # create different models
-# lr_models <- workflow_set(preproc = preproc,
-#                           models  = list(lr = lr_spec),
-#                           cross   = FALSE)
-# 
-# ## 
-# keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
-# 
-# lr_multi_test <- lr_models %>%
-#     workflow_map(seed = 1101, verbose = TRUE,
-#                  resamples = ames_folds, control = keep_pred)
-# 
-# lr_models %>% fit(data = ames_train)
-# 
-# 
-# collect_metrics(lr_multi_test) %>%
-#     filter(.metric == 'rsq')
-
-
+## Fit
+lr_fit <- fit(lr_wf, data = ames_train)
   
-# prediction plot on raw model
-basic_pred_plot <- augment(basic_lr, new_data = ames_train) %>%
-    select(Sale_Price, .pred) %>%
-    ggplot(aes(x = Sale_Price, y = .pred)) +
-    geom_point(alpha = .4) +
-    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
-    scale_x_continuous(labels = scales::number_format()) +
-    scale_y_continuous(labels = scales::number_format()) +
-    coord_obs_pred() +
-    theme_minimal()
+## Model Summary Statistics
+glance(lr_fit)
 
-# prediction plot on pre-processed model
-preproc_pred_plot <- augment(preproc_lr, new_data = ames_train) %>%
-    select(Sale_Price, .pred) %>%
-    ggplot(aes(x = Sale_Price, y = .pred)) +
-    geom_point(alpha = .4) +
-    geom_abline(lty = 2, color = 'gray50', size = 1.2) +
-    scale_x_continuous(labels = scales::number_format()) +
-    scale_y_continuous(labels = scales::number_format()) +
-    coord_obs_pred() +
-    theme_minimal()
-
-wrap_plots(basic_pred_plot, preproc_pred_plot)
+## RMSE
+lr_fit %>%
+    augment(new_data = ames_train) %>%
+    rmse(truth = Sale_Price, estimate = .pred)
 ```
-
-```{r}
-rmse(basic_lr$fit, truth = Sale_Price, estimate = .pred)
-```
-
-
-```{r}
-# the log-transformation on preproc is a problem
-# for the statistics
-bind_rows(
-    glance(basic_lr),
-    glance(preproc_lr)
-)
-```
-
 
 ## Ridge Regression
 ***
@@ -415,9 +343,6 @@ bind_rows(
 $$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda \sum^p_{j=1} \beta^2_j = RSS + \lambda \sum^p_{j=1} \beta^2_j$$
 
 where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficient estimates will approach zero.
-
-We will use the `glmnet` package to perform the ridge regression. Because parsnip doesn't have a dedicated function, we're going to use the `linear_reg` specification with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elastic net regularization (between 0 and 1).  
-When using the `glmnet` engine, we also need to set a *penalty* to fit the model.
 
 ```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
@@ -430,12 +355,16 @@ ridge_fit <- ridge_spec %>%
     fit(Sale_Price ~ ., ames_train)
 
 # plot coefficients regularization
-ridge_fit %>%
-    extract_fit_engine() %>%
-    plot(xvar = 'lambda')
+plot(ridge_fit$fit, xvar = 'lambda')
 ```
 
-The *penalty* value is a tunable one; we can fit multiple models with different values and check which one is the best. To tune it we need a workflow object containing the model and preprocessor, an rset object containing the resamples to be fitted and a tibble containing the parameter values to be evaluated.
+The engine to use for *ridge regression* is `glmnet`. In the model specification we need to select `linear_reg` with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elastic net regularization (between 0 and 1).  
+The `penalty` value is the equivalent of $\lambda$ and it is a tunable parameter; to tune the model we need a `workflow` object containing:
+
+* a `parsnip` model specification
+* a `recipe` preprocessor
+* an `rset` object containing the resamples to be fitted
+* a `tibble` with the parameter values to be evaluated.
 
 ```{r, message=FALSE}
 # set model spec
@@ -446,11 +375,10 @@ ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
 # set recipe
 ridge_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_log(Sale_Price, base = 10, skip = TRUE) %>%
-    step_other(Garage_Qual, Garage_Cond, Garage_Type, threshold = 0.05) %>%
     step_novel(all_nominal_predictors()) %>%
     step_dummy(all_nominal_predictors()) %>%
     step_zv(all_predictors()) %>%
+    # ridge needs normalized variables
     step_normalize(all_predictors())
 
 # set workflow
@@ -459,7 +387,7 @@ ridge_wf <- workflow() %>%
     add_model(ridge_spec)
 
 # create the 'penalty' grid search for tuning
-penalty_grid <- grid_regular(penalty(range = c(-5, 5)),
+penalty_grid <- grid_regular(penalty(range = c(-10, 18)),
                              levels = 50)
 
 # tune ridge penalty hyperparameter
@@ -472,7 +400,21 @@ ridge_tune <- tune_grid(ridge_wf,
 ```
 
 ```{r, fig.align='center'}
-autoplot(ridge_tune)
+ridge_best <- select_best(ridge_tune, metric = 'rmse')
+ridge_1sd <- select_by_one_std_err(ridge_tune, metric = 'rmse', penalty)
+
+ridge_tune %>%
+    collect_metrics() %>%
+    filter(.metric == 'rmse') %>%
+    ggplot(aes(x = penalty, y = mean)) +
+    geom_point() +
+    geom_line() +
+    geom_vline(xintercept = ridge_best$penalty, lty = 2, color = 'darkgray') +
+    geom_vline(xintercept = ridge_1sd$penalty, lty = 2, color = 'red') +
+    scale_x_log10(labels = scales::number_format(accuracy = 1)) +
+    scale_y_continuous(labels = scales::number_format(), expand = c(0.01, 0.01)) +
+    labs(title = 'Ridge Tuning', x = 'log-penalty', y = 'RMSE') +
+    theme_minimal()
 ```
 
 ```{r ridge_show_metrics, collapse=TRUE}
@@ -491,14 +433,7 @@ final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
 final_ridge %>%
     last_fit(ames_split) %>%
     extract_fit_engine() %>%
-    vip::vi(lambda = ridge_rmse$penalty) %>%
-    mutate(Importance = abs(Importance),
-           Variable   = forcats::fct_reorder(Variable, Importance)) %>%
-    top_n(n = 25, wt = Importance) %>%
-    ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
-    geom_col() +
-    scale_x_continuous(expand = c(0, 0)) +
-    labs(title = 'Top 25 variables by Importance')
+    vip::vip(num_features = 20L, mapping = aes(fill = Sign))
 ```
 
 ```{r}
@@ -509,7 +444,6 @@ last_fit(final_ridge, ames_split) %>% collect_metrics()
 final_ridge %>%
     last_fit(ames_split) %>%
     collect_predictions() %>%
-    mutate(.pred = 10^.pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
     geom_point(alpha = .3) +
     geom_abline(lty = 2, color = 'gray50', size = 1.2) +
@@ -543,9 +477,7 @@ lasso_fit <- lasso_spec %>%
     fit(Sale_Price ~ ., ames_train)
 
 # plot coefficients regularization
-lasso_fit %>%
-    extract_fit_engine() %>%
-    plot(xvar = 'lambda')
+plot(lasso_fit$fit, xvar = 'lambda')
 ```
 
 
@@ -570,7 +502,21 @@ lasso_tune <- tune_grid(lasso_wf,
 ```
 
 ```{r, fig.align='center'}
-autoplot(lasso_tune)
+lasso_best <- select_best(lasso_tune, metric = 'rmse')
+lasso_1sd <- select_by_one_std_err(lasso_tune, metric = 'rmse', penalty)
+
+lasso_tune %>%
+    collect_metrics() %>%
+    filter(.metric == 'rmse') %>%
+    ggplot(aes(x = penalty, y = mean)) +
+    geom_point() +
+    geom_line() +
+    geom_vline(xintercept = lasso_best$penalty, lty = 2, color = 'darkgray') +
+    geom_vline(xintercept = lasso_1sd$penalty, lty = 2, color = 'red') +
+    scale_x_log10(labels = scales::number_format(accuracy = 1)) +
+    scale_y_continuous(labels = scales::number_format(), expand = c(0.01, 0.01)) +
+    labs(title = 'Lasso Tuning', x = 'log-penalty', y = 'RMSE') +
+    theme_minimal()
 ```
 
 ```{r, fig.align='center', out.width='80%', fig.asp=0.85}
@@ -596,7 +542,6 @@ final_lasso %>%
 final_lasso %>%
     last_fit(ames_split) %>%
     collect_predictions() %>%
-    mutate(.pred = 10^.pred) %>%
     ggplot(aes(x = Sale_Price, y = .pred)) +
     geom_point(alpha = .3) +
     geom_abline(lty = 2, color = 'gray50', size = 1.2) +
