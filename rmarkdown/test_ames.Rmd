@@ -599,3 +599,66 @@ elnet_tune %>% show_best('rsq')
 elnet_tune %>% show_best('rmse')
 ```
 
+## Tree-based methods
+
+Fit regression tree
+
+```{r}
+tree_spec <- decision_tree(cost_complexity = tune()) %>%
+    set_engine('rpart') %>%
+    set_mode('regression')
+
+tree_wf <- workflow() %>%
+    add_model(tree_spec) %>%
+    add_formula(Sale_Price ~ .)
+
+tree_grid <- grid_regular(cost_complexity(range = c(-4, -1)), levels = 10)
+
+tree_tune <- tune_grid(tree_wf,
+                       resamples = ames_folds,
+                       grid      = tree_grid)
+```
+
+```{r}
+autoplot(tree_tune)
+```
+
+```{r}
+best_complexity <- select_best(tree_tune, metric = "rmse")
+
+tree_final <- finalize_workflow(tree_wf, best_complexity)
+
+tree_final_fit <- fit(tree_final, data = ames_train)
+tree_final_fit
+```
+
+```{r}
+tree_final_fit %>%
+  extract_fit_engine() %>%
+  rpart.plot::rpart.plot(roundint = FALSE)
+```
+
+## Bagging
+
+A bagging model is the same as a random forest where mtry is equal to the number of predictors. We can specify the mtry to be .cols() which means that the number of columns in the predictor matrix is used. This is useful if you want to make the specification more general and useable to many different data sets. .cols() is one of many descriptors in the parsnip package. We also set importance = TRUE in set_engine() to tell the engine to save the information regarding variable importance. This is needed for this engine if we want to use the vip package later.
+
+```{r}
+bagging_spec <- rand_forest(mtry = .cols()) %>%
+    set_engine('randomForest', importance = TRUE) %>%
+    set_mode('regression')
+
+bagging_fit <- fit(bagging_spec, Sale_Price ~ ., data = ames_train)
+```
+
+```{r}
+bagging_fit %>%
+    augment(new_data = ames_train) %>%
+    rmse(truth = Sale_Price, estimate = .pred)
+```
+
+Next, let us take a look at the variable importance
+
+```{r}
+vip::vip(bagging_fit)
+```
+
