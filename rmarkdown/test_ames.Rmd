@@ -302,7 +302,7 @@ ames_train %>%
 
 Compare two model, one raw and one pre-processed
 
-Basic fit of all predictors vs log-sale prices. This is going to be the benchmark. Using `recipe::step_log` to log-transform the target variable in order to reduce skeweness and `recipe::step_dummy` to convert nominal values to dummy variables.
+Basic fit of all predictors vs sale prices. This is going to be the benchmark. Using `recipe::step_dummy` to convert nominal values to dummy variables.
 
 
 ```{r lin_reg_model, message=FALSE, warning=FALSE, collapse=TRUE}
@@ -324,7 +324,7 @@ lr_wf <- workflow() %>%
     add_model(lr_spec)
 
 ## Fit
-lr_fit <- fit(lr_wf, data = ames_train)
+lr_fit <- lr_wf %>% fit(data = ames_train)
   
 ## Model Summary Statistics
 glance(lr_fit)
@@ -346,16 +346,14 @@ where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coeffici
 
 ```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
-ridge_spec <- linear_reg(mixture = 0, penalty = 0) %>%
+linear_reg(mixture = 0, penalty = 0) %>%
     set_mode('regression') %>%
-    set_engine('glmnet')
-
-# fit on train data
-ridge_fit <- ridge_spec %>%
-    fit(Sale_Price ~ ., ames_train)
-
-# plot coefficients regularization
-plot(ridge_fit$fit, xvar = 'lambda')
+    set_engine('glmnet') %>%
+    # fit on train data
+    fit(Sale_Price ~ ., ames_train) %>%
+    # plot coefficients regularization
+    .$fit %>%
+    plot(xvar = 'lambda')
 ```
 
 The engine to use for *ridge regression* is `glmnet`. In the model specification we need to select `linear_reg` with `mixture = 0`; the *mixture* parameter specifies if we want to use a ridge regularization (value 0), a lasso regularization (value 1) or an elastic net regularization (between 0 and 1).  
@@ -391,7 +389,10 @@ penalty_grid <- grid_regular(penalty(range = c(-10, 18)),
                              levels = 50)
 
 # tune ridge penalty hyperparameter
-doParallel::registerDoParallel()
+n_core <- parallel::detectCores() -1
+cluster <- parallel::makeCluster(n_core)
+
+doParallel::registerDoParallel(cl = cluster)
 set.seed(111)
 
 ridge_tune <- tune_grid(ridge_wf,
