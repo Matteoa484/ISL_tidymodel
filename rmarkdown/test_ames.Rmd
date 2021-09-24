@@ -210,18 +210,35 @@ lr_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_dummy(all_nominal_predictors())
 
-## Workflow
-lr_wf <- workflow() %>%
+## fit to train data
+lr_fit <- workflow() %>%
     add_recipe(lr_rec) %>%
-    add_model(lr_spec)
+    add_model(lr_spec) %>%
+    # fit to train
+    fit(data = ames_train)
 
-## Fit
-lr_fit <- lr_wf %>% fit(data = ames_train)
-  
-## RMSE
-lr_fit %>%
-    augment(new_data = ames_train) %>%
-    rmse(truth = Sale_Price, estimate = .pred)
+## predict test
+lr_pred <- lr_fit %>%
+    predict(ames_test)
+
+# compare RMSE
+lm_rmse <- 
+    bind_rows(
+        lr_fit %>%
+            augment(new_data = ames_train) %>%
+            rmse(truth = Sale_Price, estimate = .pred) %>%
+            mutate(data = 'train'),
+        lr_pred %>%
+            bind_cols(ames_test) %>%
+            rmse(truth = Sale_Price, estimate = .pred) %>%
+            mutate(data = 'test')
+    ) %>%
+    select(data, .estimate) %>%
+    tidyr::pivot_wider(names_from = data, values_from = .estimate) %>%
+    mutate(model = 'lm no-preproc') %>%
+    select(model, everything())
+
+lm_rmse
 ```
 
 Start by checking the highest t-stats
@@ -287,13 +304,9 @@ p2 <- ggplot(ames_train, aes(x = Bsmt_Unf_SF, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
       theme_minimal()
 
-<<<<<<< HEAD
 p3 <- ggplot(ames_train, aes(x = First_Flr_SF, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
       theme_minimal()
-=======
-Basic fit of all predictors vs sale prices. This is going to be the benchmark. Using `recipe::step_dummy` to convert nominal values to dummy variables, `step_other` to pool infrequently nominal values into an 'other' category and `step_novel` to assign a previously unseen factor level to a new value.
->>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 
 p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
@@ -302,55 +315,66 @@ p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
 (p1 + p2) / (p3 + p4)
 ```
 
-<<<<<<< HEAD
+
 From the plot above the best insight is that the relationship between `Year_Built` and `Sale_Price` is not linear; it seems that a polynomial should increase the precision.
 
 ```{r lr_rec1}
-=======
->>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 ## Recipe
 lr_rec1 <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
-<<<<<<< HEAD
     # remove worthless vars
     step_rm(Roof_Matl, Condition_2) %>%
     step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
     step_poly(Year_Built, degree = 2) %>%
+    step_zv(all_predictors()) %>%
     step_dummy(all_nominal_predictors())
-=======
-    step_dummy(all_nominal_predictors()) %>%
-    step_other(all_nominal_predictors(), threshold = 0.06) %>% # pool categories < 3%
-    step_novel(all_nominal_predictors())
->>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 
-## Workflow
-lr_wf <- workflow() %>%
+
+## fit to train data
+lr_fit1 <- workflow() %>%
     add_recipe(lr_rec1) %>%
-    add_model(lr_spec)
+    add_model(lr_spec) %>%
+    # fit to train
+    fit(data = ames_train)
 
-## Fit
-lr_fit1 <- lr_wf %>% fit(data = ames_train)
-  
-## RMSE
-lr_fit1 %>%
-    augment(new_data = ames_train) %>%
-    rmse(truth = Sale_Price, estimate = .pred)
+## predict test
+lr_pred1 <- lr_fit1 %>%
+    predict(ames_test)
+
+# compare RMSE
+lm_rmse <- 
+    bind_rows(
+        lr_fit1 %>%
+            augment(new_data = ames_train) %>%
+            rmse(truth = Sale_Price, estimate = .pred) %>%
+            mutate(data = 'train'),
+        lr_pred1 %>%
+            bind_cols(ames_test) %>%
+            rmse(truth = Sale_Price, estimate = .pred) %>%
+            mutate(data = 'test')
+    ) %>%
+    select(data, .estimate) %>%
+    tidyr::pivot_wider(names_from = data, values_from = .estimate) %>%
+    mutate(model = 'lm preproc1') %>%
+    select(model, everything()) %>%
+    bind_rows(lm_rmse)
+
+lm_rmse
 ```
 
-<<<<<<< HEAD
+The result above shows that a light preprocessing increase the train RMSE but reduce the test one, i.e. it increases slightly the bias in order to reduce the variance.
 
+Let's check again the variables importance
 
 ```{r}
-lr_fit %>%
-    extract_fit_engine() %>%
-    vip::vip(num_features = 20L)
+lr_fit1 %>%
+    tidy() %>%
+    filter(p.value <= 5e-04) %>%
+    top_n(n = 20L, wt = abs(statistic)) %>%
+    arrange(desc(abs(statistic)))
 ```
 
-
-## Ridge Regression
-=======
 ## Penalized Regression
->>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 ***
 
 In general the *penalized regressions*, Ridge, Lasso and ElasticNet, are a way to augment the reduce bias in order to reduce the variance. They do this by adding a penalty to the OLS, this penalty basically reduce the variables' $\beta$.
