@@ -68,14 +68,22 @@ nom_bar_plot <- function(dataset, col, title) {
       theme_minimal()
 
 }
+
+## function for scatter plot
+num_xy_plot <- function(dataset, var, target) {
+  
+  ggplot(dataset, aes(x = {{var}}, y = {{target}})) +
+      geom_point(fill = 'steelblue', alpha = .8) +
+      theme_minimal()
+  
+}
+
 ```
 
 ## Data
 ***
 
-All residential home sales in Ames, Iowa between 2006 and 2010. The data set contains many explanatory variables on the quality and quantity of physical attributes of residential homes in Iowa sold between 2006 and 2010. Most of the variables describe information a typical home buyer would like to know about a property (square footage, number of bedrooms and bathrooms, size of lot, etc.). A detailed discussion of variables can be found in the original paper referenced below.
-
-*De Cock D. 2011. Ames, Iowa: Alternative to the Boston Housing Data as an End of Semester Regression Project. Journal of Statistics Education; 19(3)*
+All residential home sales in Ames, Iowa between 2006 and 2010. The data set contains many explanatory variables on the quality and quantity of physical attributes of residential homes in Iowa sold between 2006 and 2010. Most of the variables describe information a typical home buyer would like to know about a property (square footage, number of bedrooms and bathrooms, size of lot, etc.). A detailed discussion of variables can be found in the original paper ^[De Cock D. 2011. Ames, Iowa: Alternative to the Boston Housing Data as an End of Semester Regression Project. Journal of Statistics Education; 19(3)]
 
 The data is loaded into the package `AmesHousing`; it allows the user to work on the raw data (`ames_raw`) or on a pre-processed data set (`make_ames`), which is the one used in this example.
 
@@ -131,24 +139,8 @@ ames_folds <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
 ```
 
 
-## EDA
+## Target Variable
 ***
-
-Some basic EDA on the training data set.
-
-```{r}
-skimr::skim(ames_train)
-```
-
-```{r}
-glimpse(ames_train)
-```
-
-```{r}
-head(ames_train)
-```
-
-### Target Variable
 
 The **target variable** is `Sale_Price`. Below its distribution.
 
@@ -192,111 +184,6 @@ ames_train %>%
     GGally::ggcorr(label_size = 2, legend.position = 'bottom')
 ```
 
-### Nominal Variables
-
-The data set has 46 columns which are nominal (all encoded as factors).
-
-```{r}
-ames_train %>%
-    select_if(is.factor) %>%
-    glimpse()
-```
-
-#### Garage Variables
-
-There are 4 columns on *garage* which are nominal:
-
-* Garage type (`Garage_Type`): garage location
-* Garage finish (`Garage_Finish`): interior finish of the garage
-* Garage quality (`Garage_Qual`): garage quality
-* Garage condition (`Garage_Cond`): garage condition
-
-```{r garage_bar_plot, fig.align='center', out.width='80%'}
-p1 <- nom_bar_plot(ames_train, 'Garage_Type')
-p2 <- nom_bar_plot(ames_train, 'Garage_Finish')
-p3 <- nom_bar_plot(ames_train, 'Garage_Qual')
-p4 <- nom_bar_plot(ames_train, 'Garage_Cond')
-
-
-(p1 + p2) / (p3 + p4)
-```
-
-From the plot above, we see that there are 2 variables which are heavily concentrated in just one factor (`Garage_Qual` and `Garage_Cond`).
-
-```{r, collapse=TRUE}
-# garage quality frequency table
-ames_train %>% janitor::tabyl(Garage_Qual)
-
-# garage condition frequency table
-ames_train %>% janitor::tabyl(Garage_Cond)
-```
-
-Both variables have the '*typical*' class which weights ~90%. There are two solutions to this problem: cancel the columns or lump all the factors below a certain threshold.
-
-```{r, collapse=TRUE}
-# garage quality
-ames_train %>%
-    mutate(Garage_Qual = forcats::fct_lump_prop(Garage_Qual, prop = 0.05)) %>%
-    janitor::tabyl(Garage_Qual)
-
-# garage condition
-ames_train %>%
-    mutate(Garage_Cond = forcats::fct_lump_prop(Garage_Cond, prop = 0.05)) %>%
-    janitor::tabyl(Garage_Cond)
-```
-
-A less problematic variable is `Garage_Type`, where the factors are more spread apart.
-
-```{r, collapse=TRUE}
-# garage type frequency table
-ames_train %>% janitor::tabyl(Garage_Type)
-```
-
-In this case a factor lump with a 5% threshold should be fine
-
-```{r, collapse=TRUE}
-ames_train %>%
-    mutate(Garage_Type = forcats::fct_lump_prop(Garage_Type, prop = 0.05)) %>%
-    janitor::tabyl(Garage_Type)
-```
-
-
-#### Basement Variables
-
-```{r, fig.align='center', out.width='80%', fig.asp=0.85}
-p1 <- nom_bar_plot(ames_train, 'Bsmt_Qual')
-p2 <- nom_bar_plot(ames_train, 'Bsmt_Cond')
-p3 <- nom_bar_plot(ames_train, 'Bsmt_Exposure')
-p4 <- nom_bar_plot(ames_train, 'BsmtFin_Type_1')
-p5 <- nom_bar_plot(ames_train, 'BsmtFin_Type_2')
-
-wrap_plots(p1, p2, p3, p4, p5, ncol = 3)
-```
-
-Basemend condition and basement type 2 seems to be variables with too much values in just one factor.
-
-```{r, collapse=TRUE}
-# bsm condition frequency table
-ames_train %>% janitor::tabyl(Bsmt_Cond)
-
-# bsm condition frequency with factor lump
-ames_train %>%
-    mutate(Bsmt_Cond = forcats::fct_lump_prop(Bsmt_Cond, prop = 0.05)) %>%
-    janitor::tabyl(Bsmt_Cond)
-```
-
-```{r, collapse=TRUE}
-# bsm type2 frequency table
-ames_train %>% janitor::tabyl(BsmtFin_Type_2)
-
-# bsm type2 frequency with factor lump
-ames_train %>%
-    mutate(BsmtFin_Type_2 = forcats::fct_lump_prop(BsmtFin_Type_2, 
-                                                   prop = 0.05)) %>%
-    janitor::tabyl(BsmtFin_Type_2)
-```
-
-
 ## Linear Regression
 ***
 
@@ -304,19 +191,24 @@ Compare two model, one raw and one pre-processed
 
 Basic fit of all predictors vs sale prices. This is going to be the benchmark. Using `recipe::step_dummy` to convert nominal values to dummy variables.
 
+See how data preprocessing can increase a simple model performance.
 
-```{r lin_reg_model, message=FALSE, warning=FALSE, collapse=TRUE}
+First declare the model specification, which will be used with all the different models.
+
+```{r lm_spec}
 # Model Spec
 lr_spec <- linear_reg() %>%
     set_mode('regression') %>%
     set_engine('lm')
+```
 
+Then start with a basic recipe, converting to dummy and check the most important variables (highest t-stat with low p-value)
 
+```{r lm_1, message=FALSE, warning=FALSE, collapse=TRUE}
 ## Recipe
 lr_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_dummy(all_nominal_predictors())
-
 
 ## Workflow
 lr_wf <- workflow() %>%
@@ -326,14 +218,120 @@ lr_wf <- workflow() %>%
 ## Fit
 lr_fit <- lr_wf %>% fit(data = ames_train)
   
-## Model Summary Statistics
-glance(lr_fit)
-
 ## RMSE
 lr_fit %>%
     augment(new_data = ames_train) %>%
     rmse(truth = Sale_Price, estimate = .pred)
 ```
+
+Start by checking the highest t-stats
+
+```{r}
+lr_fit %>%
+    tidy() %>%
+    filter(p.value <= 5e-04) %>%
+    top_n(n = 20L, wt = abs(statistic)) %>%
+    arrange(desc(abs(statistic)))
+```
+
+It seems that some of the categorical variables have the highest t-stat. In particular `Roof_Matl`, `Misc_Feature`, `Condition_2`, `Neighborhood`; let's check the info in this col first. The `Neighborhood` has so many levels that it is better to create a separate plot.
+
+```{r}
+c('Roof_Matl', 'Misc_Feature', 'Condition_2') %>%
+    purrr::map(nom_bar_plot, dataset = ames_train, title = .x) %>%
+    wrap_plots(ncol = 2)
+```
+
+The plots above show a problem with all three variables: one class dominate the others.
+
+```{r, collapse=TRUE}
+# roof material
+ames_train %>%
+    janitor::tabyl(Roof_Matl)
+# condition 2
+ames_train %>%
+    janitor::tabyl(Condition_2)
+```
+
+Having a column with a values equal to 99% of the observation doesn't make a lot of sense. The next recipe will delete `Roof_Matl` and `Condition_2` from the dataset and will collapse the factors levels of `Misc_Features` with a 3% threshold.
+
+Let's check `Neighborhood`
+
+```{r}
+nom_bar_plot(ames_train, 'Neighborhood')
+```
+
+Here there are a couple of levels which are rare. Here as well it makes sense to lump the factors with a 3% limit.
+
+Moving to numerical predictors, we see that `Second_Flr_SF`, `First_Flr_SF`, `Bsmt_Unf_SF`, `Lot_Area` and `Year_Built` have a high t-stat.  
+Below the relative distributions, all more or less right-skewed.
+
+```{r}
+ames_train %>%
+    select(Sale_Price, Second_Flr_SF, First_Flr_SF, 
+           Bsmt_Unf_SF, Lot_Area, Year_Built) %>%
+    tidyr::pivot_longer(-Sale_Price, names_to = 'var', values_to = 'value') %>%
+    ggplot(aes(x = value)) +
+    geom_histogram(bins = 60) +
+    facet_wrap(~var, scales = 'free')
+```
+
+Let's try to check the relationship between the variable and the target.
+
+```{r}
+p1 <- ggplot(ames_train, aes(x = Year_Built, y = Sale_Price)) +
+      geom_point(color = 'steelblue', alpha = .5) +
+      theme_minimal()
+
+p2 <- ggplot(ames_train, aes(x = Bsmt_Unf_SF, y = Sale_Price)) +
+      geom_point(color = 'steelblue', alpha = .5) +
+      theme_minimal()
+
+p3 <- ggplot(ames_train, aes(x = First_Flr_SF, y = Sale_Price)) +
+      geom_point(color = 'steelblue', alpha = .5) +
+      theme_minimal()
+
+p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
+      geom_point(color = 'steelblue', alpha = .5) +
+      theme_minimal()
+
+(p1 + p2) / (p3 + p4)
+```
+
+From the plot above the best insight is that the relationship between `Year_Built` and `Sale_Price` is not linear; it seems that a polynomial should increase the precision.
+
+```{r lr_rec1}
+## Recipe
+lr_rec1 <-
+    recipe(Sale_Price ~ ., data = ames_train) %>%
+    # remove worthless vars
+    step_rm(Roof_Matl, Condition_2) %>%
+    step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
+    step_poly(Year_Built, degree = 2) %>%
+    step_dummy(all_nominal_predictors())
+
+## Workflow
+lr_wf <- workflow() %>%
+    add_recipe(lr_rec1) %>%
+    add_model(lr_spec)
+
+## Fit
+lr_fit1 <- lr_wf %>% fit(data = ames_train)
+  
+## RMSE
+lr_fit1 %>%
+    augment(new_data = ames_train) %>%
+    rmse(truth = Sale_Price, estimate = .pred)
+```
+
+
+
+```{r}
+lr_fit %>%
+    extract_fit_engine() %>%
+    vip::vip(num_features = 20L)
+```
+
 
 ## Ridge Regression
 ***
