@@ -287,9 +287,13 @@ p2 <- ggplot(ames_train, aes(x = Bsmt_Unf_SF, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
       theme_minimal()
 
+<<<<<<< HEAD
 p3 <- ggplot(ames_train, aes(x = First_Flr_SF, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
       theme_minimal()
+=======
+Basic fit of all predictors vs sale prices. This is going to be the benchmark. Using `recipe::step_dummy` to convert nominal values to dummy variables, `step_other` to pool infrequently nominal values into an 'other' category and `step_novel` to assign a previously unseen factor level to a new value.
+>>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 
 p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
       geom_point(color = 'steelblue', alpha = .5) +
@@ -298,17 +302,26 @@ p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
 (p1 + p2) / (p3 + p4)
 ```
 
+<<<<<<< HEAD
 From the plot above the best insight is that the relationship between `Year_Built` and `Sale_Price` is not linear; it seems that a polynomial should increase the precision.
 
 ```{r lr_rec1}
+=======
+>>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 ## Recipe
 lr_rec1 <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
+<<<<<<< HEAD
     # remove worthless vars
     step_rm(Roof_Matl, Condition_2) %>%
     step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
     step_poly(Year_Built, degree = 2) %>%
     step_dummy(all_nominal_predictors())
+=======
+    step_dummy(all_nominal_predictors()) %>%
+    step_other(all_nominal_predictors(), threshold = 0.06) %>% # pool categories < 3%
+    step_novel(all_nominal_predictors())
+>>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 
 ## Workflow
 lr_wf <- workflow() %>%
@@ -324,6 +337,7 @@ lr_fit1 %>%
     rmse(truth = Sale_Price, estimate = .pred)
 ```
 
+<<<<<<< HEAD
 
 
 ```{r}
@@ -334,13 +348,20 @@ lr_fit %>%
 
 
 ## Ridge Regression
+=======
+## Penalized Regression
+>>>>>>> 9be2c359f62fd6b8787b76c30525d284c44b4b72
 ***
+
+In general the *penalized regressions*, Ridge, Lasso and ElasticNet, are a way to augment the reduce bias in order to reduce the variance. They do this by adding a penalty to the OLS, this penalty basically reduce the variables' $\beta$.
+
+### Ridge Regression
 
 *Ridge regression* is very similar to OLS, except that the coefficients are estimated by minimizing a different quantity. The *ridge regression* coefficients are the values that minimize
 
 $$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda \sum^p_{j=1} \beta^2_j = RSS + \lambda \sum^p_{j=1} \beta^2_j$$
 
-where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficient estimates will approach zero.
+where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficients are reduced to a point where they will approach zero.
 
 ```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
@@ -362,7 +383,7 @@ The `penalty` value is the equivalent of $\lambda$ and it is a tunable parameter
 * an `rset` object containing the resamples to be fitted
 * a `tibble` with the parameter values to be evaluated.
 
-```{r, message=FALSE}
+```{r ridge_model, message=FALSE}
 # set model spec
 ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
     set_mode('regression') %>%
@@ -370,9 +391,7 @@ ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
 
 # set recipe
 ridge_rec <-
-    recipe(Sale_Price ~ ., data = ames_train) %>%
-    step_novel(all_nominal_predictors()) %>%
-    step_dummy(all_nominal_predictors()) %>%
+    lr_rec %>%
     step_zv(all_predictors()) %>%
     # ridge needs normalized variables
     step_normalize(all_predictors())
@@ -383,8 +402,7 @@ ridge_wf <- workflow() %>%
     add_model(ridge_spec)
 
 # create the 'penalty' grid search for tuning
-penalty_grid <- grid_regular(penalty(range = c(-10, 18)),
-                             levels = 50)
+penalty_grid <- grid_regular(penalty(range = c(-10, 10)), levels = 50)
 
 # tune ridge penalty hyperparameter
 n_core <- parallel::detectCores() -1
@@ -398,7 +416,7 @@ ridge_tune <- tune_grid(ridge_wf,
                         grid      = penalty_grid)
 ```
 
-```{r, fig.align='center'}
+```{r ridge_tune_plot, fig.align='center'}
 ridge_best <- select_best(ridge_tune, metric = 'rmse')
 ridge_1sd <- select_by_one_std_err(ridge_tune, metric = 'rmse', penalty)
 
@@ -410,7 +428,7 @@ ridge_tune %>%
     geom_line() +
     geom_vline(xintercept = ridge_best$penalty, lty = 2, color = 'darkgray') +
     geom_vline(xintercept = ridge_1sd$penalty, lty = 2, color = 'red') +
-    scale_x_log10(labels = scales::number_format(accuracy = 1)) +
+    scale_x_log10() +
     scale_y_continuous(labels = scales::number_format(), expand = c(0.01, 0.01)) +
     labs(title = 'Ridge Tuning', x = 'log-penalty', y = 'RMSE') +
     theme_minimal()
@@ -424,15 +442,22 @@ ridge_tune %>%
     show_best(metric = 'rmse')
 ```
 
-```{r ridge_vip_plot, fig.align='center', fig.asp=0.85}
+```{r ridge_vip, fig.align='center', fig.asp=0.85}
 ridge_rmse <- ridge_tune %>% select_best('rmse')
 
 final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
 
 final_ridge %>%
-    last_fit(ames_split) %>%
+    fit(ames_train) %>%
     extract_fit_engine() %>%
-    vip::vip(num_features = 20L, mapping = aes(fill = Sign))
+    vip::vi(lambda = ridge_rmse$penalty) %>%
+    mutate(Importance = abs(Importance),
+           Variable = forcats::fct_reorder(Variable, Importance)) %>%
+    slice_max(Importance, n = 20) %>%
+    ggplot(aes(x = Importance, y = Variable, color = Sign)) +
+    geom_point() +
+    theme_minimal() +
+    theme(legend.position = 'none')
 ```
 
 ```{r}
@@ -452,7 +477,7 @@ final_ridge %>%
 ```
 
 
-## Lasso Regression
+### Lasso Regression
 ***
 
 The *least absolute shrinkage and selection operator* (lasso) model is an alternative to ridge regression that has a small modification to the penalty in the objective function. Rather than the $L_2$ penalty it uses the $L_1$ penalty $\lambda\sum^p_{j=1}|\beta_j|$ in the objective function.
@@ -467,22 +492,20 @@ Use mixture = 1 in glmnet.
 
 ```{r lasso_lamba_plot, cache=TRUE, fig.align='center'}
 # set test model spec (penalty not-tuned)
-lasso_spec <- linear_reg(mixture = 1, penalty = 0) %>%
+linear_reg(mixture = 1, penalty = 0) %>%
     set_mode('regression') %>%
-    set_engine('glmnet')
-
-# fit on train data
-lasso_fit <- lasso_spec %>%
-    fit(Sale_Price ~ ., ames_train)
-
-# plot coefficients regularization
-plot(lasso_fit$fit, xvar = 'lambda')
+    set_engine('glmnet') %>%
+    # fit on train data
+    fit(Sale_Price ~ ., ames_train) %>%
+    # plot coefficients regularization
+    .$fit %>%
+    plot(xvar = 'lambda')
 ```
 
 
 We can re-use the ridge recipe in the lasso workflow
 
-```{r}
+```{r lasso_model}
 lasso_spec <- linear_reg(mixture = 1, penalty = tune()) %>%
     set_mode('regression') %>%
     set_engine('glmnet')
@@ -491,7 +514,7 @@ lasso_wf <- workflow() %>%
     add_recipe(ridge_rec) %>%
     add_model(lasso_spec)
 
-penalty_grid <- grid_regular(penalty(range = c(-5, 5)),
+penalty_grid <- grid_regular(penalty(range = c(-10, 10)),
                              levels = 50)
 
 lasso_tune <- tune_grid(lasso_wf,
@@ -524,17 +547,16 @@ lasso_penalty <- lasso_tune %>% select_best(metric = 'rmse')
 final_lasso <- finalize_workflow(lasso_wf, lasso_penalty)
 
 final_lasso %>%
-    fit(data = ames_train) %>%
-    extract_fit_parsnip() %>%
+    fit(ames_train) %>%
+    extract_fit_engine() %>%
     vip::vi(lambda = lasso_penalty$penalty) %>%
     mutate(Importance = abs(Importance),
            Variable   = forcats::fct_reorder(Variable, Importance)) %>%
-    top_n(n = 25, wt = Importance) %>%
+    slice_max(Importance, n = 20) %>%
     ggplot(aes(x = Importance, y = Variable, color = Sign)) +
     geom_point() +
-    scale_x_continuous(expand = c(0, 0)) +
-    labs(title = 'Top 25 Influential Variables', y = '') +
-    theme_minimal()
+    theme_minimal() +
+    theme(legend.position = 'none')
 ```
 
 ```{r, fig.align='center', out.width='80%'}
@@ -549,7 +571,7 @@ final_lasso %>%
     scale_y_continuous(labels = scales::number_format())
 ```
 
-## Elastic Net
+### Elastic Net
 ***
 
 *Elastic Net* is a generalization of the ridge and lasso models, which combines the two penalties:
@@ -639,7 +661,7 @@ tree_final_fit %>%
 
 ## Bagging
 
-A bagging model is the same as a random forest where mtry is equal to the number of predictors. We can specify the mtry to be .cols() which means that the number of columns in the predictor matrix is used. This is useful if you want to make the specification more general and useable to many different data sets. .cols() is one of many descriptors in the parsnip package. We also set importance = TRUE in set_engine() to tell the engine to save the information regarding variable importance. This is needed for this engine if we want to use the vip package later.
+A bagging model is the same as a random forest where mtry is equal to the number of predictors. We can specify the mtry to be .cols() which means that the number of columns in the predictor matrix is used. This is useful if you want to make the specification more general and usable to many different data sets. .cols() is one of many descriptors in the parsnip package. We also set importance = TRUE in set_engine() to tell the engine to save the information regarding variable importance. This is needed for this engine if we want to use the vip package later.
 
 ```{r}
 bagging_spec <- rand_forest(mtry = .cols()) %>%
