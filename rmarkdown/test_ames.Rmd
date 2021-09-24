@@ -187,11 +187,7 @@ ames_train %>%
 ## Linear Regression
 ***
 
-Compare two model, one raw and one pre-processed
-
-Basic fit of all predictors vs sale prices. This is going to be the benchmark. Using `recipe::step_dummy` to convert nominal values to dummy variables.
-
-See how data preprocessing can increase a simple model performance.
+Compare multiple preprocessing steps in linear regression.
 
 First declare the model specification, which will be used with all the different models.
 
@@ -202,7 +198,15 @@ lr_spec <- linear_reg() %>%
     set_engine('lm')
 ```
 
-Then start with a basic recipe, converting to dummy and check the most important variables (highest t-stat with low p-value)
+I'll start with a very simple model, with all the variables and no preprocessing, except for the creation of dummy variables for all the nominal predictors. 
+The `recipes::step_dummy` will create a set of binary dummy variables. By default the excluded dummy will correspond to the first level of the unordered factor.
+
+```{r step_dummy}
+recipe(Sale_Price ~ Garage_Type, data = ames_train[1:10, ]) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    prep() %>%
+    bake(new_data = ames_train[1:10, ])
+```
 
 ```{r lm_1, message=FALSE, warning=FALSE, collapse=TRUE}
 ## Recipe
@@ -251,7 +255,7 @@ lr_fit %>%
     arrange(desc(abs(statistic)))
 ```
 
-It seems that some of the categorical variables have the highest t-stat. In particular `Roof_Matl`, `Misc_Feature`, `Condition_2`, `Neighborhood`; let's check the info in this col first. The `Neighborhood` has so many levels that it is better to create a separate plot.
+It seems that some of the categorical variables have the highest t-stat. In particular `Roof_Matl`, `Misc_Feature`, `Condition_2`, `Neighborhood`; let's check the info in this col first.
 
 ```{r}
 c('Roof_Matl', 'Misc_Feature', 'Condition_2') %>%
@@ -315,8 +319,15 @@ p4 <- ggplot(ames_train, aes(x = Lot_Area, y = Sale_Price)) +
 (p1 + p2) / (p3 + p4)
 ```
 
-
 From the plot above the best insight is that the relationship between `Year_Built` and `Sale_Price` is not linear; it seems that a polynomial should increase the precision.
+
+To recap, we're going to:
+
+* remove `Roof_Matl` and `Condition_2` with `recipes::step_rm`
+* lump all factor levels below 3% in `Misc_Feature` and `Neighborhood` with `recipes::step_other`
+* create a polynomial fit, degree 2, between `Sale_Price` and `Year_Built`
+* remove zero-variance columns via `recipes::zv`
+* create dummy vars with `recipes::dummy`
 
 ```{r lr_rec1}
 ## Recipe
