@@ -5,7 +5,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center')
 ```
 
 ## Introduction
@@ -208,57 +208,52 @@ recipe(Sale_Price ~ Garage_Type, data = ames_train[1:10, ]) %>%
     bake(new_data = ames_train[1:10, ])
 ```
 
-```{r lm_1, message=FALSE, warning=FALSE, collapse=TRUE}
+Next I create a basic recipe
+
+```{r, collapse=TRUE}
 ## Recipe
-lr_rec <-
+base_rec <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     step_dummy(all_nominal_predictors())
-
-## fit to train data
-lr_fit <- workflow() %>%
-    add_recipe(lr_rec) %>%
-    add_model(lr_spec) %>%
-    # fit to train
-    fit(data = ames_train)
-
-## predict test
-lr_pred <- lr_fit %>%
-    predict(ames_test)
-
-# compare RMSE
-lm_rmse <- 
-    bind_rows(
-        lr_fit %>%
-            augment(new_data = ames_train) %>%
-            rmse(truth = Sale_Price, estimate = .pred) %>%
-            mutate(data = 'train'),
-        lr_pred %>%
-            bind_cols(ames_test) %>%
-            rmse(truth = Sale_Price, estimate = .pred) %>%
-            mutate(data = 'test')
-    ) %>%
-    select(data, .estimate) %>%
-    tidyr::pivot_wider(names_from = data, values_from = .estimate) %>%
-    mutate(model = 'lm no-preproc') %>%
-    select(model, everything())
-
-lm_rmse
+base_rec
 ```
 
-Start by checking the highest t-stats
+Which is added to a workflow
+
+```{r, collapse=TRUE}
+base_wf <- workflow() %>%
+    add_recipe(base_rec) %>%
+    add_model(lr_spec)
+base_wf
+```
+
+And I fit and predict
+
+```{r, warning=FALSE, message=FALSE}
+base_train <- fit_resamples(base_wf, ames_folds)
+base_test <- last_fit(base_wf, ames_split)
+```
+
+```{r, collapse=TRUE}
+collect_metrics(base_train)
+
+collect_metrics(base_test)
+```
+
+Start by checking the 20 most important variables
 
 ```{r}
-lr_fit %>%
-    tidy() %>%
-    filter(p.value <= 5e-04) %>%
-    top_n(n = 20L, wt = abs(statistic)) %>%
-    arrange(desc(abs(statistic)))
+base_test %>%
+    extract_fit_engine() %>%
+    vip::vip(n = 20L, geom = 'point', mapping = aes_string(color = 'Sign')) +
+    theme_minimal() +
+    theme(legend.position = 'none')
 ```
 
 It seems that some of the categorical variables have the highest t-stat. In particular `Roof_Matl`, `Misc_Feature`, `Condition_2`, `Neighborhood`; let's check the info in this col first.
 
 ```{r}
-c('Roof_Matl', 'Misc_Feature', 'Condition_2') %>%
+c('Roof_Matl', 'Misc_Feature', 'Condition_2', 'Pool_QC') %>%
     purrr::map(nom_bar_plot, dataset = ames_train, title = .x) %>%
     wrap_plots(ncol = 2)
 ```
@@ -274,7 +269,7 @@ ames_train %>%
     janitor::tabyl(Condition_2)
 ```
 
-Having a column with a values equal to 99% of the observation doesn't make a lot of sense. The next recipe will delete `Roof_Matl` and `Condition_2` from the dataset and will collapse the factors levels of `Misc_Features` with a 3% threshold.
+Having a column with a values equal to 99% of the observation doesn't make a lot of sense. The next recipe will delete `Pool_QC`, `Roof_Matl` and `Condition_2` from the dataset and will collapse the factors levels of `Misc_Features` with a 3% threshold.
 
 Let's check `Neighborhood`
 
@@ -334,56 +329,74 @@ To recap, we're going to:
 lr_rec1 <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
     # remove worthless vars
-    step_rm(Roof_Matl, Condition_2) %>%
+    step_rm(Roof_Matl, Condition_2, Pool_QC) %>%
     step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
     step_poly(Year_Built, degree = 2) %>%
     step_zv(all_predictors()) %>%
     step_dummy(all_nominal_predictors())
 
+#W update workflow
+rec1_wf <- base_wf %>%
+    update_recipe(lr_rec1)
 
-## fit to train data
-lr_fit1 <- workflow() %>%
-    add_recipe(lr_rec1) %>%
-    add_model(lr_spec) %>%
-    # fit to train
-    fit(data = ames_train)
 
-## predict test
-lr_pred1 <- lr_fit1 %>%
-    predict(ames_test)
+rec1_train <- fit_resamples(rec1_wf, ames_folds)
 
-# compare RMSE
-lm_rmse <- 
-    bind_rows(
-        lr_fit1 %>%
-            augment(new_data = ames_train) %>%
-            rmse(truth = Sale_Price, estimate = .pred) %>%
-            mutate(data = 'train'),
-        lr_pred1 %>%
-            bind_cols(ames_test) %>%
-            rmse(truth = Sale_Price, estimate = .pred) %>%
-            mutate(data = 'test')
-    ) %>%
-    select(data, .estimate) %>%
-    tidyr::pivot_wider(names_from = data, values_from = .estimate) %>%
-    mutate(model = 'lm preproc1') %>%
-    select(model, everything()) %>%
-    bind_rows(lm_rmse)
-
-lm_rmse
+rec1_test <- last_fit(rec1_wf, ames_split)
 ```
 
 The result above shows that a light preprocessing increase the train RMSE but reduce the test one, i.e. it increases slightly the bias in order to reduce the variance.
 
+```{r, collapse=TRUE}
+collect_metrics(rec1_train)
+collect_metrics(rec1_test)
+```
+
+
 Let's check again the variables importance
 
 ```{r}
-lr_fit1 %>%
-    tidy() %>%
-    filter(p.value <= 5e-04) %>%
-    top_n(n = 20L, wt = abs(statistic)) %>%
-    arrange(desc(abs(statistic)))
+rec1_test %>%
+    extract_fit_engine() %>%
+    vip::vip(n = 20L, geom = 'point', mapping = aes_string(color = 'Sign')) +
+    theme_minimal() +
+    theme(legend.position = 'none')
 ```
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(ames_train, aes(x = First_Flr_SF, y = Sale_Price)) +
+      geom_point(color = 'steelblue', alpha = .5) +
+      facet_wrap(~Bsmt_Qual) +
+      geom_smooth(method = 'lm') +
+      theme_minimal()
+```
+
+```{r lr_rec2}
+## Recipe
+lr_rec2 <-
+    recipe(Sale_Price ~ ., data = ames_train) %>%
+    # remove worthless vars
+    step_rm(Roof_Matl, Condition_2, Pool_QC) %>%
+    step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
+    step_poly(Year_Built, degree = 2) %>%
+    step_interact(terms = First_Flr_SF ~ Bsmt_Qual) %>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors())
+
+# update workflow
+rec2_wf <- rec1_wf %>%
+    update_recipe(lr_rec2)
+
+rec2_train <- fit_resamples(rec2_wf, ames_folds)
+
+rec2_test <- last_fit(rec2_wf, ames_split)
+```
+
+```{r}
+collect_metrics(rec2_train)
+collect_metrics(rec2_test)
+```
+
 
 ## Penalized Regression
 ***
@@ -426,7 +439,7 @@ ridge_spec <- linear_reg(mixture = 0, penalty = tune()) %>%
 
 # set recipe
 ridge_rec <-
-    lr_rec %>%
+    base_rec %>%
     step_zv(all_predictors()) %>%
     # ridge needs normalized variables
     step_normalize(all_predictors())
