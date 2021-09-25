@@ -144,7 +144,7 @@ ames_folds <- vfold_cv(ames_train, v = 10, strata = Sale_Price)
 
 The **target variable** is `Sale_Price`. Below its distribution.
 
-```{r, message=FALSE, warning=FALSE, fig.align='center', out.width='80%'}
+```{r, message=FALSE, warning=FALSE, out.width='80%'}
 px_dist <- ames_train %>%
     select(Sale_Price) %>%
     ggplot(aes(x = Sale_Price)) +
@@ -164,7 +164,7 @@ px_dist
 
 The histogram shows that the most common selling level to be around \$160'000 (*median*) and the average selling price to be \$180'000 (*mean*). The plot shows also a right skewed distribution which suggest there are concern with an assumption of normality. To solve this problem it could be better to log-transform the variable.  
 
-```{r, message=FALSE, warning=FALSE, fig.width=10, fig.align='center'}
+```{r, message=FALSE, warning=FALSE, fig.width=10}
 px_log_dist <- px_dist +
     scale_x_log10(labels = scales::label_number(),
                   expand = c(0.01, 0.01)) +
@@ -177,7 +177,7 @@ The log-transformation helps to meet normality assumption, highlighting a couple
 
 Next check the correlation between variables, to control for potential collinearity.
 
-```{r ames_corplot, fig.align='center', out.width='80%'}
+```{r ames_corplot, out.width='80%'}
 ames_train %>%
     select_if(is.numeric) %>%
     cor(use = 'complete.obs') %>%
@@ -187,7 +187,13 @@ ames_train %>%
 ## Linear Regression
 ***
 
-Compare multiple preprocessing steps in linear regression.
+Before starting with the modelling set the metrics to use for model evaluation (RMSE).
+
+```{r}
+metric_set(rmse)
+```
+
+To get a sense of which variables are the most important I'll start with `workflowsets::leave_var_out_formulas` which creates a list of formulas that exclude each predictor.
 
 First declare the model specification, which will be used with all the different models.
 
@@ -198,8 +204,91 @@ lr_spec <- linear_reg() %>%
     set_engine('lm')
 ```
 
-I'll start with a very simple model, with all the variables and no preprocessing, except for the creation of dummy variables for all the nominal predictors. 
-The `recipes::step_dummy` will create a set of binary dummy variables. By default the excluded dummy will correspond to the first level of the unordered factor.
+```{r, collapse=TRUE}
+formulas <- leave_var_out_formulas(Sale_Price ~ ., data = ames)
+length(formulas)
+```
+
+Create the workflow set
+
+```{r}
+lm_wfset <- workflow_set(preproc = formulas,
+                         models = list(lm = lr_spec))
+```
+
+Since we are using a linear regression, there's nothing to tune. Thus we can use `tune::fit_resamples` passing it as a name instead of a function.
+
+```{r, warning=FALSE, message=FALSE}
+# set parallel computing
+doParallel::registerDoParallel()
+
+lm_wfset <- lm_wfset %>%
+    workflow_map('fit_resamples', resamples = ames_folds)
+```
+
+From the vignette of `workflowsets` I took this cool way to calculate the impact of each variable to the performance of the model. It simply calculate the difference in RMSE between the full model, the one that uses all the variables, and each model where one variable is out.
+
+The first step is to collect the RMSE for every model and every fold (`summarize = FALSE`)
+
+```{r}
+# collect metrics for each model and each fold
+rmse_val <- lm_wfset %>%
+    # collect metrics for all models
+    collect_metrics(summarize = FALSE) %>%
+    # keep RMSE
+    filter(.metric == 'rmse') %>%
+    # remove "_lm" from the full model name
+    mutate(wflow_id = gsub('_lm', '', wflow_id))
+```
+
+The second step consists in saving the full model RMSE for each fold.
+
+```{r}
+# extract the full model RMSE for each fold
+full_model <- rmse_val %>%
+    filter(wflow_id == 'everything') %>%
+    select(full_model = .estimate, id)
+```
+
+The we can calculate the RMSE difference between the full model and the leave-one-out model for each fold. In order to compare the same RMSE, we merge the datasets together using the fold id.
+
+```{r}
+# calculate RMSE drop for each fold
+differences <- rmse_val %>%
+    filter(wflow_id != 'everything') %>%
+    # merge models rmse with full model by fold (id)
+    full_join(full_model, by = 'id') %>%
+    # for each row calculate the perf increase/decrease
+    mutate(perf_drop = full_model - .estimate)
+```
+
+We can then calculate for each model a summary of the RMSE (mean error, standard deviation, lower and upper limit)
+
+```{r}
+# calculate stats for each model
+model_stats <- differences %>%
+    group_by(wflow_id) %>%
+    summarize(std_error = sd(perf_drop)/sum(!is.na(perf_drop)),
+              perf_drop = mean(perf_drop),
+              lower = perf_drop - qnorm(0.975) * std_error,
+              upper = perf_drop + qnorm(0.975) * std_error,
+              .groups = 'drop') %>%
+    mutate(wflow_id = factor(wflow_id),
+           wflow_id = forcats::fct_reorder(wflow_id, perf_drop))
+```
+
+Once we have the data we need, we can plot the result. For every single vriable, the plot shows if leaving it out of regression increase or decrease the RMSE. The more a variable is important to the model, the more the RMSE drops vs the full model. Thus the variable with the highest drop in performance are the most important.
+
+```{r, fig.asp=1.5}
+ggplot(model_stats, aes(x = perf_drop, y = wflow_id)) + 
+  geom_point() + 
+  geom_errorbar(aes(xmin = lower, xmax = upper), width = .25) +
+  ylab("") +
+    theme_minimal()
+```
+
+Because of the high number of predictors, it makes sense to start focusing on the top 15 variables in the preprocessing.  
+The baseline model vs we compare is the full model without any preprocessing except for the `recipes::step_dummy`, which will create a set of binary dummy variables. By default the excluded dummy will correspond to the first level of the unordered factor.
 
 ```{r step_dummy}
 recipe(Sale_Price ~ Garage_Type, data = ames_train[1:10, ]) %>%
@@ -324,7 +413,7 @@ To recap, we're going to:
 * remove zero-variance columns via `recipes::zv`
 * create dummy vars with `recipes::dummy`
 
-```{r lr_rec1}
+```{r lr_rec1, warning=FALSE, message=FALSE}
 ## Recipe
 lr_rec1 <-
     recipe(Sale_Price ~ ., data = ames_train) %>%
@@ -379,9 +468,10 @@ lr_rec2 <-
     step_rm(Roof_Matl, Condition_2, Pool_QC) %>%
     step_other(Misc_Feature, Neighborhood, threshold = 0.03) %>%
     step_poly(Year_Built, degree = 2) %>%
-    step_interact(terms = First_Flr_SF ~ Bsmt_Qual) %>%
-    step_zv(all_predictors()) %>%
-    step_dummy(all_nominal_predictors())
+    step_interact(First_Flr_SF ~ Bsmt_Qual) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_zv(all_predictors())
+    
 
 # update workflow
 rec2_wf <- rec1_wf %>%
@@ -411,7 +501,7 @@ $$\sum^n_{i=1}\bigg(y_i - \beta_0 - \sum^p_{j=1} \beta_j x_{ij} \bigg) + \lambda
 
 where $\lambda$ is a tuning parameter. Like OLS, ridge regression seeks coefficients estimates that minimize the RSS, however the *shrinkage penalty*, also called $L_2$, $\lambda \sum^p_{j=1} \beta^2_j$ is small when $\beta_1,...,\beta_p$ are close to zero, effectively shrinking the estimates of $\beta_j$ towards zero. The tuning parameter $\lambda$ serves to control the relative impact of these two terms; when $\lambda = 0$ the penalty term has no effect and the ridge regression will produce the least squared estimates. As $\lambda \rightarrow \infty$ the impact of the penalty term grows and the coefficients are reduced to a point where they will approach zero.
 
-```{r ridge_lamba_plot, cache=TRUE, fig.align='center'}
+```{r ridge_lamba_plot}
 # set test model spec (penalty not-tuned)
 linear_reg(mixture = 0, penalty = 0) %>%
     set_mode('regression') %>%
@@ -464,7 +554,7 @@ ridge_tune <- tune_grid(ridge_wf,
                         grid      = penalty_grid)
 ```
 
-```{r ridge_tune_plot, fig.align='center'}
+```{r ridge_tune_plot}
 ridge_best <- select_best(ridge_tune, metric = 'rmse')
 ridge_1sd <- select_by_one_std_err(ridge_tune, metric = 'rmse', penalty)
 
@@ -490,7 +580,7 @@ ridge_tune %>%
     show_best(metric = 'rmse')
 ```
 
-```{r ridge_vip, fig.align='center', fig.asp=0.85}
+```{r ridge_vip, fig.asp=0.85}
 ridge_rmse <- ridge_tune %>% select_best('rmse')
 
 final_ridge <- finalize_workflow(ridge_wf, ridge_rmse)
@@ -512,7 +602,7 @@ final_ridge %>%
 last_fit(final_ridge, ames_split) %>% collect_metrics()
 ```
 
-```{r, fig.align='center', out.width='80%'}
+```{r, out.width='80%'}
 final_ridge %>%
     last_fit(ames_split) %>%
     collect_predictions() %>%
@@ -538,7 +628,7 @@ Whereas the ridge regression approach pushes variables to approximately but not 
 
 Use mixture = 1 in glmnet.
 
-```{r lasso_lamba_plot, cache=TRUE, fig.align='center'}
+```{r lasso_lamba_plot}
 # set test model spec (penalty not-tuned)
 linear_reg(mixture = 1, penalty = 0) %>%
     set_mode('regression') %>%
@@ -571,7 +661,7 @@ lasso_tune <- tune_grid(lasso_wf,
 
 ```
 
-```{r, fig.align='center'}
+```{r}
 lasso_best <- select_best(lasso_tune, metric = 'rmse')
 lasso_1sd <- select_by_one_std_err(lasso_tune, metric = 'rmse', penalty)
 
@@ -589,7 +679,7 @@ lasso_tune %>%
     theme_minimal()
 ```
 
-```{r, fig.align='center', out.width='80%', fig.asp=0.85}
+```{r, out.width='80%', fig.asp=0.85}
 lasso_penalty <- lasso_tune %>% select_best(metric = 'rmse')
 
 final_lasso <- finalize_workflow(lasso_wf, lasso_penalty)
@@ -607,7 +697,7 @@ final_lasso %>%
     theme(legend.position = 'none')
 ```
 
-```{r, fig.align='center', out.width='80%'}
+```{r, out.width='80%'}
 final_lasso %>%
     last_fit(ames_split) %>%
     collect_predictions() %>%
